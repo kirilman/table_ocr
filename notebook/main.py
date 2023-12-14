@@ -50,6 +50,9 @@ class Table:
         self.lst_X = lst_X
         self.lst_Y = lst_Y
         # self.lst_number = self.connect_part_in_column(self.lst_number)
+
+        self.X_before = lst_X.copy()
+        self.Y_before = lst_Y.copy()
         if len(self.lst_X) != len(self.lst_Y):
             self.lst_X = self.connect_part_in_column(self.lst_X)
             self.lst_Y = self.connect_part_in_column(self.lst_Y)
