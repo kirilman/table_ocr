@@ -12,6 +12,7 @@ from pdf2image import convert_from_path
 from nms import non_max_suppression
 import onnxruntime as ort
 import torch
+from sklearn.cluster import KMeans
 
 IMAGE_EXTENTIONS = (".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".gif", ".webp")
 
@@ -27,9 +28,10 @@ class Table:
         self.arr_xpos = np.array([x["x_c"] for x in list_coords])
         self.arr_ypos = np.array([x["y_c"] for x in list_coords])
         # центры класстеров по х для объектов
-        self.centers = np.array(
-            [self.arr_xpos.min(), self.arr_xpos.mean(), self.arr_xpos.max()]
-        )
+        kmean = KMeans(3, n_init=1)
+        kmean.fit(self.arr_xpos.reshape(-1, 1))
+        self.centers = np.sort(kmean.cluster_centers_.T[0])
+
         lst_number, lst_X, lst_Y = [], [], []
         for item in list_coords:
             number_pos = np.argmin(
@@ -40,11 +42,11 @@ class Table:
                 ]
             )
             if number_pos == 0:
-                lst_number.append(item)
+                lst_number.append(item.copy())
             elif number_pos == 1:
-                lst_X.append(item)
+                lst_X.append(item.copy())
             elif number_pos == 2:
-                lst_Y.append(item)
+                lst_Y.append(item.copy())
         print(f"Списки: {len(lst_number)} и {len(lst_X)} и {len(lst_Y)}")
         self.lst_number = lst_number
         self.lst_X = lst_X
@@ -53,27 +55,32 @@ class Table:
 
         self.X_before = lst_X.copy()
         self.Y_before = lst_Y.copy()
-        if len(self.lst_X) != len(self.lst_Y):
-            self.lst_X = self.connect_part_in_column(self.lst_X)
-            self.lst_Y = self.connect_part_in_column(self.lst_Y)
+
+        # if len(self.lst_X) != len(self.lst_Y):
+        #     self.lst_X = self.connect_part_in_column(self.lst_X)
+        #     self.lst_Y = self.connect_part_in_column(self.lst_Y)
+
+        self.lst_X = self.merge_paths_column_list(self.lst_X)
+        self.lst_Y = self.merge_paths_column_list(self.lst_Y)
+        print(f"Списки: {len(self.lst_X)} и {len(self.lst_Y)}")
         # проверка элементов to float
-        if len(self.lst_X) != len(self.lst_Y):
-            for k, item in enumerate(self.lst_X):
-                try:
-                    value = self.string_to_float(item["value"])
-                    self.lst_X[k]["value"] = value
-                except:
-                    del self.lst_X[k]
-            for k, item in enumerate(self.lst_Y):
-                try:
-                    value = self.string_to_float(item["value"])
-                    self.lst_Y[k]["value"] = value
-                except:
-                    del lst_Y[k]
-        else:
-            for k, (x_item, y_item) in enumerate(zip(self.lst_X, self.lst_Y)):
-                self.lst_X[k]["value"] = self.string_to_float(x_item["value"])
-                self.lst_Y[k]["value"] = self.string_to_float(y_item["value"])
+        # if len(self.lst_X) != len(self.lst_Y):
+        #     for k,item in enumerate(self.lst_X):
+        #         try:
+        #             value = self.string_to_float(item['value'])
+        #             self.lst_X[k]['value'] = value
+        #         except:
+        #             del self.lst_X[k]
+        #     for k,item in enumerate(self.lst_Y):
+        #         try:
+        #             value = self.string_to_float(item['value'])
+        #             self.lst_Y[k]['value'] = value
+        #         except:
+        #             del self.lst_Y[k]
+        # else:
+        #     for k, (x_item,y_item) in enumerate(zip(self.lst_X, self.lst_Y)):
+        #         self.lst_X[k]['value'] = self.string_to_float(x_item['value'])
+        #         self.lst_Y[k]['value'] = self.string_to_float(y_item['value'])
 
         print(f"Списки: {len(self.lst_X)} и {len(self.lst_Y)}")
         self._create_cells(self.lst_number, self.lst_X, self.lst_Y)
@@ -86,12 +93,25 @@ class Table:
         return self.cells
 
     def _create_cells(self, lst_number, lst_X, lst_Y):
-        number_line = len(lst_X)
-        self.cells = [[None for j in range(3)] for i in range(number_line)]
-        for i, (x_v, y_v) in enumerate(zip(lst_X, lst_Y)):
-            self.cells[i][0] = self.get_nearest_number(x_v)
-            self.cells[i][1] = x_v
-            self.cells[i][2] = y_v
+        if len(lst_X) == len(lst_Y):
+            self.cells = [[None for j in range(3)] for i in range(len(lst_X))]
+            for i, (x_v, y_v) in enumerate(zip(lst_X, lst_Y)):
+                self.cells[i][0] = self.get_nearest_number(x_v)
+                self.cells[i][1] = x_v
+                self.cells[i][2] = y_v
+        else:
+            number_line = max(len(lst_X), len(lst_Y))
+            self.cells = [[None for j in range(3)] for i in range(number_line)]
+            if len(lst_X) > len(lst_Y):
+                for k, item in enumerate(lst_X):
+                    self.cells[k][0] = self.get_nearest_number(item)
+                    self.cells[k][1] = item
+                    self.cells[k][2] = self.get_nearest_item_in_table(item, lst_Y)
+            else:
+                for k, item in enumerate(lst_Y):
+                    self.cells[k][0] = self.get_nearest_number(item)
+                    self.cells[k][1] = self.get_nearest_item_in_table(item, lst_X)
+                    self.cells[k][2] = item
         return self.cells
 
     @property
@@ -110,7 +130,7 @@ class Table:
 
     def get_nearest_number(self, x_value):
         """
-        Получить номер точки для текущей координаты X по позиции в изображении x_c и y_c
+        Получить номер(первый столбец) точки для текущей координаты X(второй столбец) по позиции в изображении x_c и y_c
         """
         yc = x_value["y_c"]
         ypos_number = np.array([x["y_c"] for x in self.lst_number])
@@ -127,6 +147,28 @@ class Table:
             return {
                 "value": "Err",
                 "x_c": np.array([x["x_c"] for x in self.lst_number]).mean(),
+                "y_c": yc,
+            }
+
+    def get_nearest_item_in_table(self, x_value, list_coords):
+        """
+        Получить Y(3-й столбец) координату для текущей координаты X(второй столбец)
+        """
+        yc = x_value["y_c"]
+        ypos_Y = np.array([x["y_c"] for x in list_coords])
+
+        # ypos_Y = np.array([x['y_c'] for x in self.lst_Y])
+        # ypos_X = np.array([x['y_c'] for x in self.lst_X])
+
+        cell_height = (abs(ypos_Y[1:] - ypos_Y[:-1])).mean()
+        delta = abs(ypos_Y - yc)
+        index = np.argmin(delta)
+        if delta[index] <= cell_height * (0.9):
+            return list_coords[index]
+        else:
+            return {
+                "value": "Err",
+                "x_c": np.array([x["x_c"] for x in list_coords]).mean(),
                 "y_c": yc,
             }
 
@@ -165,7 +207,6 @@ class Table:
             r = abs(item["x_c"] - x_mean) ** 2
             cur_len = len(item["value"])
             if cur_len < min_length - 1:
-                print(item["value"], abs(item["x_c"] - x_mean) ** 2)
                 second_item = find_other_part(list_items, item)
                 # print(item, second_item)
                 visited.append(second_item)
@@ -181,19 +222,13 @@ class Table:
 
     @property
     def frame(self):
-        new_items = []
-        for t in self.cells:
-            if t[0] == None or t[1] == None or t[2] == None:
-                continue
-            else:
-                new_items.append(t)
-        frame = pd.DataFrame(
+        return pd.DataFrame(
             {
-                "X": [c[1]["value"] for c in new_items],
-                "Y": [c[2]["value"] for c in new_items],
+                "N": [c[0]["value"] for c in self.cells],
+                "X": [c[1]["value"] for c in self.cells],
+                "Y": [c[2]["value"] for c in self.cells],
             }
         )
-        return frame
 
     @staticmethod
     def string_to_float(string):
@@ -224,6 +259,43 @@ class Table:
         if len(result) == 0:
             return 0
         return float(result.replace(",", "."))
+
+    def merge_paths_column_list(self, list_items):
+        ycoords = np.array([x["y_c"] for x in list_items])
+        y_diff = ycoords[1:] - ycoords[:-1]
+        index = np.where(y_diff > y_diff.mean())[0]
+        yc_lvl = ycoords[index]
+
+        n = len(y_diff)
+        if n < 5:
+            mean_delta = y_diff.mean()
+        else:
+            mean_delta = np.sort(y_diff)[3:].mean()
+
+        ymain_lvl = [ycoords[0]]
+        for v in ycoords:
+            delta = abs(v - ymain_lvl[-1])
+            if delta < mean_delta * 0.3:
+                continue
+            else:
+                ymain_lvl.append(v)
+
+        items_on_lvl = {f"{i}": [] for i, item in enumerate(ymain_lvl)}
+        for v in list_items:
+            k = np.argmin(abs(np.array(ymain_lvl) - v["y_c"]))
+            items_on_lvl[str(k)].append(v)
+
+        new_items_list = []
+        for k, items in items_on_lvl.items():
+            if len(items) > 1:
+                val = "".join([str(v["value"]) for v in items])
+                val = val.replace("-", "")
+                yc = np.array([v["y_c"] for v in items]).mean()
+                xc = np.array([v["x_c"] for v in items]).mean()
+                new_items_list.append({"value": val, "x_c": xc, "y_c": yc})
+            else:
+                new_items_list.append(items[0])
+        return new_items_list
 
 
 def letterbox_image(image, expected_size=(736, 736)):
@@ -262,7 +334,12 @@ def process_directory(root):
         path2model = str(p)
         print(p)
     model = ort.InferenceSession(path2model)
-    ocr = ocr_predictor(pretrained=True, detect_language=True, detect_orientation=False)
+    ocr = ocr_predictor(
+        reco_arch="crnn_mobilenet_v3_large",
+        pretrained=True,
+        detect_language=True,
+        detect_orientation=False,
+    )
 
     result_path = Path("./results")
     if result_path.exists():
@@ -270,6 +347,8 @@ def process_directory(root):
     else:
         result_path.mkdir()
     files = list(Path(root).rglob("*.pdf"))
+    if len(files) == 0:
+        files = ["1"]
     print(len(files))
     for pdf_file in files:
         try:
@@ -278,20 +357,21 @@ def process_directory(root):
                 # poppler_path=r".\poppler-23.11.0\Library\bin"
                 poppler_path="./poppler-23.11.0/Library/bin",
             )
-        except:
+        except Exception as e:
             images = list(Path(root).rglob("*"))
             images = list(
                 filter(
                     lambda x: True if x.suffix in IMAGE_EXTENTIONS else False, images
                 )
             )
+            print(e)
         print(images)
         for image in images:
             if isinstance(image, Path):
                 img = cv2.imread(str(image))
             else:
                 img = np.array(image)
-            print(img.shape)
+
             batch, or_img = preprocess_image(img)
             h_orig, w_orig = img.shape[:2]
             h_crop, w_crop = or_img.shape[:2]
@@ -340,15 +420,23 @@ def process_directory(root):
                 try:
                     table = Table()
                     cells = table.from_coords(coords)
-
-                    table.frame.to_csv(
-                        f"./results/{pdf_file.stem}_table_{num_table}.csv",
-                        sep=";",
-                        index=False,
-                    )
+                    if isinstance(image, np.ndarray):
+                        table.frame.to_csv(
+                            f"./results/{pdf_file.stem}_table_{num_table}.csv",
+                            sep=";",
+                            index=False,
+                        )
+                    else:
+                        table.frame.to_csv(
+                            f"./results/{image.stem}_table_{num_table}.csv",
+                            sep=";",
+                            index=False,
+                        )
                     num_table += 1
-                except:
-                    print("Неудалось", pdf_file)
+                except Exception as e:
+                    print("Неудалось", pdf_file, " ", e)
 
 
-process_directory("/storage/reshetnikov/sber_table/notebook/input/")
+process_directory("/storage/reshetnikov/sber_table/dataset/val/")
+#
+# process_directory("/storage/reshetnikov/sber_table/notebook/val/")
