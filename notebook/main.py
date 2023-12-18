@@ -2,17 +2,23 @@ import numpy as np
 import matplotlib.pyplot as plt  # библиотека Matplotlib для визуализации
 import cv2
 from pathlib import Path
-import pypdfium2
 import os
 
 os.environ["USE_TORCH"] = "1"
 from doctr.models import ocr_predictor
 import pandas as pd
-from pdf2image import convert_from_path
 from nms import non_max_suppression
 import onnxruntime as ort
 import torch
 from sklearn.cluster import KMeans
+
+try:
+    import fitz
+except Exception as er:
+    print(er)
+
+from PIL import Image
+from pdf2image import convert_from_path
 
 IMAGE_EXTENTIONS = (".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".gif", ".webp")
 
@@ -222,13 +228,16 @@ class Table:
 
     @property
     def frame(self):
-        return pd.DataFrame(
+        df = pd.DataFrame(
             {
-                "N": [c[0]["value"] for c in self.cells],
+                # "N": [c[0]["value"] for c in self.cells],
                 "X": [c[1]["value"] for c in self.cells],
                 "Y": [c[2]["value"] for c in self.cells],
             }
         )
+        # drop item
+        df = df[df.X.apply(lambda x: True if len(x) > 4 else False)]
+        return df
 
     @staticmethod
     def string_to_float(string):
@@ -326,6 +335,39 @@ def preprocess_image(image):
     return batch, image_norm
 
 
+def sort_table_predict(predicts):
+    list_pred = []
+    for t_pred in predicts:
+        x1, y1, x2, y2 = t_pred[:4].detach().cpu().numpy()
+        list_pred.append({"x": x1, "y": y1, "pred": t_pred})
+
+    sort_by_x = sorted(list_pred, key=lambda x: x["x"])
+    if len(sort_by_x) == 2:
+        return [x["pred"] for x in sort_by_x]
+
+    def sorted_with_y(list_items, sorted_list):
+        if len(list_items) == 0:
+            return sorted_list
+        min_x = list_items[0]["x"]
+        y_min = 10000
+        min_item = list_items[0]
+        for item in list_items:
+            if item["y"] < y_min and item["x"] < min_x:
+                # if item["y"] < y_min:
+                y_min = item["y"]
+                min_item = item
+        sorted_list.append(min_item)
+        list_items.remove(min_item)
+        sorted_with_y(list_items, sorted_list)
+
+        return sorted_list
+
+    sorted_predict = []
+    sorted_with_y(sort_by_x, sorted_predict)
+
+    return [x["pred"] for x in sorted_predict]
+
+
 def process_directory(root):
     root = Path(root)
     print(os.getcwd())
@@ -352,11 +394,22 @@ def process_directory(root):
     print(len(files))
     for pdf_file in files:
         try:
-            images = convert_from_path(
-                pdf_file,
-                # poppler_path=r".\poppler-23.11.0\Library\bin"
-                poppler_path="./poppler-23.11.0/Library/bin",
-            )
+            images = []
+
+            dpi = 200  # choose desired dpi here
+            zoom = dpi / 72  # zoom factor, standard: 72 dpi
+            magnify = fitz.Matrix(zoom, zoom)  # magnifies in x, resp. y direction
+            doc = fitz.open(pdf_file)  # open document
+            images = []
+            for page in doc:
+                pix = page.get_pixmap(matrix=magnify)  # render page to an image
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                images.append(img)
+            # images = convert_from_path(
+            #     pdf_file,
+            #     # poppler_path=r".\poppler-23.11.0\Library\bin"
+            #     poppler_path="./poppler-23.11.0/Library/bin",
+            # )
         except Exception as e:
             images = list(Path(root).rglob("*"))
             images = list(
@@ -365,11 +418,13 @@ def process_directory(root):
                 )
             )
             print(e)
-        print(images)
+
+        num_table = 0
         for image in images:
             if isinstance(image, Path):
                 img = cv2.imread(str(image))
             else:
+                # img = Image.frombytes("RGB", [image.width, image.height], image.samples)
                 img = np.array(image)
 
             batch, or_img = preprocess_image(img)
@@ -382,11 +437,13 @@ def process_directory(root):
             # preds = model.predict(img, classes = [0]) Yolo
 
             predict = non_max_suppression(
-                torch.tensor(outputs[0]), conf_thres=0.5, iou_thres=0.5
+                torch.tensor(outputs[0]), conf_thres=0.6, iou_thres=0.2
             )[0]
             _cls = predict[:, 5]
-            table_predict = predict[_cls == 0]
-            num_table = 0
+            table_predicts = predict[_cls == 0]
+
+            table_predict = sort_table_predict(table_predicts)
+
             for t_pred in table_predict:
                 x1, y1, x2, y2 = t_pred[:4]
 
@@ -420,7 +477,8 @@ def process_directory(root):
                 try:
                     table = Table()
                     cells = table.from_coords(coords)
-                    if isinstance(image, np.ndarray):
+                    print(pdf_file)
+                    if isinstance(img, np.ndarray):
                         table.frame.to_csv(
                             f"./results/{pdf_file.stem}_table_{num_table}.csv",
                             sep=";",
@@ -437,6 +495,7 @@ def process_directory(root):
                     print("Неудалось", pdf_file, " ", e)
 
 
-process_directory("/storage/reshetnikov/sber_table/dataset/val/")
+process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
+# process_directory("./bad_example/")
 #
 # process_directory("/storage/reshetnikov/sber_table/notebook/val/")
