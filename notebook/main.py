@@ -28,6 +28,11 @@ class Table:
         self.arr_xpos = None
         self.arr_ypos = None
 
+    def check_centers(self):
+        if abs(self.centers[1] - self.centers[0]) / self.centers[1] * 100 < 5:
+            print("Координаты для кластера '№ номер' и 'X' совпали")
+            self.centers[0] = 0.05
+
     def from_coords(self, list_coords):
         print(len(list_coords))
         # центры класстеров по x coorditane каждого разпознаного объекта
@@ -37,6 +42,7 @@ class Table:
         kmean = KMeans(3, n_init=1)
         kmean.fit(self.arr_xpos.reshape(-1, 1))
         self.centers = np.sort(kmean.cluster_centers_.T[0])
+        self.check_centers()
 
         lst_number, lst_X, lst_Y = [], [], []
         for item in list_coords:
@@ -140,6 +146,13 @@ class Table:
         """
         yc = x_value["y_c"]
         ypos_number = np.array([x["y_c"] for x in self.lst_number])
+        if len(ypos_number) == 0:
+            return {
+                "value": "Err",
+                "x_c": self.centers[0],
+                "y_c": yc,
+            }
+
         ypos_X = np.array([x["y_c"] for x in self.lst_X])
         cell_height = (
             ypos_X[1:] - ypos_X[:-1]
@@ -244,6 +257,7 @@ class Table:
         if type(string) == float:
             return string
         result = string
+        result = result.replace("/")
         result = result.replace("\\", "")
         result = result.replace("/", "").replace("%", "")
         if result.count(".") > 1:
@@ -303,7 +317,11 @@ class Table:
                 xc = np.array([v["x_c"] for v in items]).mean()
                 new_items_list.append({"value": val, "x_c": xc, "y_c": yc})
             else:
-                new_items_list.append(items[0])
+                m = items[0]
+                if 4 < len(m["value"]) <= 12:
+                    new_items_list.append(items[0])
+        # выкинуть выбрасы по X
+
         return new_items_list
 
 
@@ -340,10 +358,13 @@ def sort_table_predict(predicts):
     for t_pred in predicts:
         x1, y1, x2, y2 = t_pred[:4].detach().cpu().numpy()
         list_pred.append({"x": x1, "y": y1, "pred": t_pred})
-
     sort_by_x = sorted(list_pred, key=lambda x: x["x"])
+    print(sort_by_x)
     if len(sort_by_x) == 2:
-        return [x["pred"] for x in sort_by_x]
+        if sort_by_x[0]["y"] > sort_by_x[1]["y"]:
+            return [x["pred"] for x in [sort_by_x[1], sort_by_x[0]]]  # переставить
+        else:
+            return [x["pred"] for x in sort_by_x]
 
     def sorted_with_y(list_items, sorted_list):
         if len(list_items) == 0:
@@ -366,6 +387,39 @@ def sort_table_predict(predicts):
     sorted_with_y(sort_by_x, sorted_predict)
 
     return [x["pred"] for x in sorted_predict]
+
+
+def drop_last_line(_df):
+    df = _df.copy()
+    if all(df.iloc[-1, 1:] == df.iloc[0, 1:]):
+        df = df[:-1]
+    return df
+
+
+def save_table(tables, save_path, f_name):
+    if len(tables) == 1:
+        final_frame = pd.concat(tables, axis=0)
+        if all(final_frame.iloc[-1, 1:] == final_frame.iloc[0, 1:]):
+            final_frame = final_frame[:-1]
+    else:
+        final_frame = pd.DataFrame()
+        for table in tables:
+            if len(table) > 4:
+                df = drop_last_line(table)
+            else:
+                df = table
+            final_frame = pd.concat((final_frame, df), ignore_index=True)
+
+    final_frame = final_frame.round(2)
+    final_frame = final_frame.astype(str)
+    # final_frame["X"] = final_frame["X"].apply(lambda x: x.replace(".", ","))
+    # final_frame["Y"] = final_frame["Y"].apply(lambda x: x.replace(".", ","))
+    final_frame.to_excel(
+        Path(save_path) / f"{f_name}.xlsx",
+        float_format="%.2f",
+        index=False,
+        header=False,
+    )
 
 
 def process_directory(root):
@@ -420,6 +474,7 @@ def process_directory(root):
             print(e)
 
         num_table = 0
+        tables = []
         for image in images:
             if isinstance(image, Path):
                 img = cv2.imread(str(image))
@@ -460,6 +515,12 @@ def process_directory(root):
                 # x1,y1, x2, y2 = b.xyxy.detach().cpu().numpy()[0]
                 # x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                 img_crop = cv2.erode(img_crop, kernel=np.ones((2, 2), np.uint8))
+                # save crop
+                cv2.imwrite(
+                    f"./results/crop/{pdf_file.stem}_{np.random.randint(500)}.jpg",
+                    img_crop,
+                )
+
                 result = ocr([img_crop])
                 pages = result.export()["pages"]
                 blocks = pages[0]["blocks"]
@@ -479,11 +540,12 @@ def process_directory(root):
                     cells = table.from_coords(coords)
                     print(pdf_file)
                     if isinstance(img, np.ndarray):
-                        table.frame.to_csv(
-                            f"./results/{pdf_file.stem}_table_{num_table}.csv",
-                            sep=";",
-                            index=False,
-                        )
+                        # table.frame.to_csv(
+                        #     f"./results/{pdf_file.stem}_table_{num_table}.csv",
+                        #     sep=";",
+                        #     index=False,
+                        # )
+                        pass
                     else:
                         table.frame.to_csv(
                             f"./results/{image.stem}_table_{num_table}.csv",
@@ -491,11 +553,18 @@ def process_directory(root):
                             index=False,
                         )
                     num_table += 1
+                    tables.append(table.frame)
                 except Exception as e:
                     print("Неудалось", pdf_file, " ", e)
+            # after tables t_pred
+        if len(tables) > 0:
+            save_table(tables, "./results", pdf_file.stem)
+            # final_frame = pd.concat(2, axis=0)
+            # final_frame.to_csv(f"./results/{pdf_file.stem}.csv", index=False)
 
 
-process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
+# process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
+process_directory("/storage/reshetnikov/sber_table/dataset/hard/")
 # process_directory("./bad_example/")
 #
 # process_directory("/storage/reshetnikov/sber_table/notebook/val/")
