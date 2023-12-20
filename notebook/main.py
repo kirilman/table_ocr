@@ -96,6 +96,13 @@ class Table:
 
         print(f"Списки: {len(self.lst_X)} и {len(self.lst_Y)}")
         self._create_cells(self.lst_number, self.lst_X, self.lst_Y)
+
+        # to float
+
+        for cell in self.cells:
+            cell[1]["value"] = self.string_to_float(cell[1]["value"])
+            cell[2]["value"] = self.string_to_float(cell[2]["value"])
+
         self.arr_xpos = np.array(
             [x["x_c"] for x in list(self.lst_number + self.lst_X + self.lst_Y)]
         )
@@ -249,7 +256,7 @@ class Table:
             }
         )
         # drop item
-        df = df[df.X.apply(lambda x: True if len(x) > 4 else False)]
+        df = df[df.X.apply(lambda x: True if len(str(x)) > 4 else False)]
         return df
 
     @staticmethod
@@ -257,9 +264,9 @@ class Table:
         if type(string) == float:
             return string
         result = string
-        result = result.replace("/")
+        result = result.replace("/", "7")
         result = result.replace("\\", "")
-        result = result.replace("/", "").replace("%", "")
+        result = result.replace("%", "")
         if result.count(".") > 1:
             parts = result.split(".")
             result = "".join(parts[:-1]) + "." + parts[-1]
@@ -285,6 +292,8 @@ class Table:
 
     def merge_paths_column_list(self, list_items):
         ycoords = np.array([x["y_c"] for x in list_items])
+        # for y in ycoords:
+        #     print(y)
         y_diff = ycoords[1:] - ycoords[:-1]
         index = np.where(y_diff > y_diff.mean())[0]
         yc_lvl = ycoords[index]
@@ -293,7 +302,7 @@ class Table:
         if n < 5:
             mean_delta = y_diff.mean()
         else:
-            mean_delta = np.sort(y_diff)[3:].mean()
+            mean_delta = np.sort(y_diff)[2:-2].mean()
 
         ymain_lvl = [ycoords[0]]
         for v in ycoords:
@@ -309,6 +318,7 @@ class Table:
             items_on_lvl[str(k)].append(v)
 
         new_items_list = []
+
         for k, items in items_on_lvl.items():
             if len(items) > 1:
                 val = "".join([str(v["value"]) for v in items])
@@ -321,7 +331,8 @@ class Table:
                 if 4 < len(m["value"]) <= 12:
                     new_items_list.append(items[0])
         # выкинуть выбрасы по X
-
+        # for x in new_items_list:
+        #     print(x)
         return new_items_list
 
 
@@ -359,7 +370,7 @@ def sort_table_predict(predicts):
         x1, y1, x2, y2 = t_pred[:4].detach().cpu().numpy()
         list_pred.append({"x": x1, "y": y1, "pred": t_pred})
     sort_by_x = sorted(list_pred, key=lambda x: x["x"])
-    print(sort_by_x)
+    # print(sort_by_x)
     if len(sort_by_x) == 2:
         if sort_by_x[0]["y"] > sort_by_x[1]["y"]:
             return [x["pred"] for x in [sort_by_x[1], sort_by_x[0]]]  # переставить
@@ -390,24 +401,35 @@ def sort_table_predict(predicts):
 
 
 def drop_last_line(_df):
-    df = _df.copy()
+    df = _df.frame.copy()
     if all(df.iloc[-1, 1:] == df.iloc[0, 1:]):
         df = df[:-1]
+    else:  # разрывы в таблице
+        # класстеризация на два кластера шага между ячейками
+        # y_pos = np.array([x['y_c'] for x in _df.lst_X])
+        # y_steps = y_pos[1:] - y_pos[:-1]
+
+        # kmean = KMeans(2, init = [y_steps.min(), y_steps.max()])
+        # kmean.fit(y_steps.reshape(-1, 1))
+        # number_classter = kmean.predict(y_steps)
+
+        # for
+        pass
     return df
 
 
 def save_table(tables, save_path, f_name):
     if len(tables) == 1:
-        final_frame = pd.concat(tables, axis=0)
+        final_frame = pd.concat([t.frame for t in tables], axis=0)
         if all(final_frame.iloc[-1, 1:] == final_frame.iloc[0, 1:]):
             final_frame = final_frame[:-1]
     else:
         final_frame = pd.DataFrame()
         for table in tables:
-            if len(table) > 4:
+            if len(table.frame) > 4:
                 df = drop_last_line(table)
             else:
-                df = table
+                df = table.frame
             final_frame = pd.concat((final_frame, df), ignore_index=True)
 
     final_frame = final_frame.round(2)
@@ -553,7 +575,7 @@ def process_directory(root):
                             index=False,
                         )
                     num_table += 1
-                    tables.append(table.frame)
+                    tables.append(table)
                 except Exception as e:
                     print("Неудалось", pdf_file, " ", e)
             # after tables t_pred
@@ -563,8 +585,8 @@ def process_directory(root):
             # final_frame.to_csv(f"./results/{pdf_file.stem}.csv", index=False)
 
 
-# process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
-process_directory("/storage/reshetnikov/sber_table/dataset/hard/")
+process_directory("./input/")
+# process_directory("/storage/reshetnikov/sber_table/dataset/hard/")
 # process_directory("./bad_example/")
 #
 # process_directory("/storage/reshetnikov/sber_table/notebook/val/")
