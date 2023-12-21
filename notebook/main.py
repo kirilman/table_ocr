@@ -60,10 +60,14 @@ class Table:
             elif number_pos == 2:
                 lst_Y.append(item.copy())
         print(f"Списки: {len(lst_number)} и {len(lst_X)} и {len(lst_Y)}")
-        self.lst_number = lst_number
+        self.lst_number = sorted(lst_number, key=lambda d: d["y_c"])
+        lst_X = sorted(lst_X, key=lambda d: d["y_c"])
+        lst_Y = sorted(lst_Y, key=lambda d: d["y_c"])
+
         self.lst_X = lst_X
         self.lst_Y = lst_Y
         # self.lst_number = self.connect_part_in_column(self.lst_number)
+        # сортировка списков по координате y
 
         self.X_before = lst_X.copy()
         self.Y_before = lst_Y.copy()
@@ -256,7 +260,8 @@ class Table:
             }
         )
         # drop item
-        df = df[df.X.apply(lambda x: True if len(str(x)) > 4 else False)]
+        df = df[df.X.apply(lambda x: True if len(str(x)) > 3 else False)]
+        # df = df[df.Y.apply(lambda x: True if len(str(x)) > 4 else False)]
         return df
 
     @staticmethod
@@ -265,6 +270,7 @@ class Table:
             return string
         result = string
         result = result.replace("/", "7")
+        result = result.replace("B", "3")
         result = result.replace("\\", "")
         result = result.replace("%", "")
         if result.count(".") > 1:
@@ -328,7 +334,7 @@ class Table:
                 new_items_list.append({"value": val, "x_c": xc, "y_c": yc})
             else:
                 m = items[0]
-                if 4 < len(m["value"]) <= 12:
+                if 4 < len(m["value"]) <= 13:
                     new_items_list.append(items[0])
         # выкинуть выбрасы по X
         # for x in new_items_list:
@@ -357,11 +363,42 @@ def preprocess_image(image):
         # convert the image from RGBA2RGB
         image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
     # image = letterbox_image(image)
+    angle, image = correct_skew(image)
+    image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 15)  #
+    image = cv2.erode(image, kernel=np.ones((2, 2), np.uint8))  #
     image = cv2.resize(image, (736, 736))
     image = image / image.max()
     image_norm = image.copy()
     batch = torch.tensor(image[np.newaxis, :], dtype=torch.float).permute(0, 3, 1, 2)
     return batch, image_norm
+
+
+def rotate_image(image, angle):
+    (h, w) = image.shape[:2]
+    center = (w // 2, h // 2)
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+    corrected = cv2.warpAffine(
+        image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE
+    )
+    return corrected
+
+
+def determine_score(arr):
+    histogram = np.sum(arr, axis=2, dtype=float)
+    score = np.sum((histogram[..., 1:] - histogram[..., :-1]) ** 2, axis=1, dtype=float)
+    return score
+
+
+def correct_skew(image, delta=0.1, limit=5):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.bitwise_not(gray)
+    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+    angles = np.arange(-limit, limit + delta, delta)
+    img_stack = np.stack([rotate_image(thresh, angle) for angle in angles], axis=0)
+    scores = determine_score(img_stack)
+    best_angle = angles[np.argmax(scores)]
+    corrected = rotate_image(image, best_angle)
+    return best_angle, corrected
 
 
 def sort_table_predict(predicts):
@@ -402,20 +439,56 @@ def sort_table_predict(predicts):
 
 def drop_last_line(_df):
     df = _df.frame.copy()
-    if all(df.iloc[-1, 1:] == df.iloc[0, 1:]):
-        df = df[:-1]
-    else:  # разрывы в таблице
-        # класстеризация на два кластера шага между ячейками
-        # y_pos = np.array([x['y_c'] for x in _df.lst_X])
-        # y_steps = y_pos[1:] - y_pos[:-1]
+    # if all(df.iloc[-1, 1:] == df.iloc[0, 1:]):
+    #     df = df[:-1]
+    # else:  # разрывы в таблице
+    # класстеризация на два кластера шага между ячейками
+    # y_pos = np.array([x['y_c'] for x in _df.lst_X])
+    # y_steps = y_pos[1:] - y_pos[:-1]
 
-        # kmean = KMeans(2, init = [y_steps.min(), y_steps.max()])
-        # kmean.fit(y_steps.reshape(-1, 1))
-        # number_classter = kmean.predict(y_steps)
+    # kmean = KMeans(2, init = [y_steps.min(), y_steps.max()])
+    # kmean.fit(y_steps.reshape(-1, 1))
+    # number_classter = kmean.predict(y_steps)
 
-        # for
-        pass
+    # for
+    # pass
     return df
+
+
+def add_gaps_label(df):
+    """
+    Добавить метку начала и конца полигона для полигонов внутри одной таблицы
+    """
+    df["O"] = np.nan
+    has_gap = False
+    add_next = False
+    df_dict = []
+
+    for k, line in df.iterrows():
+        if k == 0:
+            x_val = line[0]
+            y_val = line[1]
+            df.iloc[0, 2] = "O"
+            df_dict.append({"X": x_val, "Y": y_val, "L": "O"})
+            continue
+
+        if (x_val == line[0]) and (y_val == line[1]):
+            has_gap = True
+
+        if add_next:
+            df_dict.append({"X": line[0], "Y": line[1], "L": "K"})
+            add_next = False
+            continue
+
+        if has_gap:
+            has_gap = False
+            x_val = line[0]
+            y_val = line[1]
+            add_next = True
+        else:
+            df_dict.append({"X": line[0], "Y": line[1], "L": np.nan})
+
+    return pd.DataFrame(df_dict)
 
 
 def save_table(tables, save_path, f_name):
@@ -436,11 +509,13 @@ def save_table(tables, save_path, f_name):
     final_frame = final_frame.astype(str)
     # final_frame["X"] = final_frame["X"].apply(lambda x: x.replace(".", ","))
     # final_frame["Y"] = final_frame["Y"].apply(lambda x: x.replace(".", ","))
+    final_frame = add_gaps_label(final_frame)
     final_frame.to_excel(
         Path(save_path) / f"{f_name}.xlsx",
         float_format="%.2f",
         index=False,
         header=False,
+        na_rep="",
     )
 
 
@@ -531,7 +606,8 @@ def process_directory(root):
                     int(y2 * h_rate),
                 )
                 x1, y1, x2, y2
-                img_crop = img[y1:y2, x1:x2, :]
+                down_cor = int(abs(y2 - y1) * 0.025)
+                img_crop = img[y1 : y2 + down_cor, x1 - 10 : x2 + 10, :]
 
                 # yolo
                 # x1,y1, x2, y2 = b.xyxy.detach().cpu().numpy()[0]
@@ -585,8 +661,10 @@ def process_directory(root):
             # final_frame.to_csv(f"./results/{pdf_file.stem}.csv", index=False)
 
 
-process_directory("./input/")
-# process_directory("/storage/reshetnikov/sber_table/dataset/hard/")
+# process_directory("./input/")
+
+process_directory("/storage/reshetnikov/sber_table/dataset/hard/")
+# process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
 # process_directory("./bad_example/")
 #
 # process_directory("/storage/reshetnikov/sber_table/notebook/val/")
