@@ -260,8 +260,8 @@ class Table:
             }
         )
         # drop item
-        df = df[df.X.apply(lambda x: True if len(str(x)) > 3 else False)]
-        # df = df[df.Y.apply(lambda x: True if len(str(x)) > 4 else False)]
+        df = df[df.X.apply(lambda x: True if len(str(x)) > 5 else False)]
+        df = df[df.Y.apply(lambda x: True if len(str(x)) > 5 else False)]
         return df
 
     @staticmethod
@@ -363,7 +363,7 @@ def preprocess_image(image):
         # convert the image from RGBA2RGB
         image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
     # image = letterbox_image(image)
-    angle, image = correct_skew(image)
+    # angle, image = correct_skew(image)
     image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 15)  #
     image = cv2.erode(image, kernel=np.ones((2, 2), np.uint8))  #
     image = cv2.resize(image, (736, 736))
@@ -459,6 +459,7 @@ def add_gaps_label(df):
     """
     Добавить метку начала и конца полигона для полигонов внутри одной таблицы
     """
+    # print(df)
     df["O"] = np.nan
     has_gap = False
     add_next = False
@@ -477,14 +478,15 @@ def add_gaps_label(df):
 
         if add_next:
             df_dict.append({"X": line[0], "Y": line[1], "L": "K"})
+            x_val = line[0]
+            y_val = line[1]
             add_next = False
             continue
 
         if has_gap:
             has_gap = False
-            x_val = line[0]
-            y_val = line[1]
             add_next = True
+            df_dict.append({"X": line[0], "Y": line[1], "L": np.nan})
         else:
             df_dict.append({"X": line[0], "Y": line[1], "L": np.nan})
 
@@ -494,8 +496,9 @@ def add_gaps_label(df):
 def save_table(tables, save_path, f_name):
     if len(tables) == 1:
         final_frame = pd.concat([t.frame for t in tables], axis=0)
-        if all(final_frame.iloc[-1, 1:] == final_frame.iloc[0, 1:]):
-            final_frame = final_frame[:-1]
+        # выкидывает последную координату
+        # if all(final_frame.iloc[-1, 1:] == final_frame.iloc[0, 1:]):
+        #    final_frame = final_frame[:-1]
     else:
         final_frame = pd.DataFrame()
         for table in tables:
@@ -504,7 +507,7 @@ def save_table(tables, save_path, f_name):
             else:
                 df = table.frame
             final_frame = pd.concat((final_frame, df), ignore_index=True)
-
+    # нет последней коорд
     final_frame = final_frame.round(2)
     final_frame = final_frame.astype(str)
     # final_frame["X"] = final_frame["X"].apply(lambda x: x.replace(".", ","))
@@ -614,10 +617,10 @@ def process_directory(root):
                 # x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                 img_crop = cv2.erode(img_crop, kernel=np.ones((2, 2), np.uint8))
                 # save crop
-                # cv2.imwrite(
-                #     f"./results/crop/{pdf_file.stem}_{np.random.randint(500)}.jpg",
-                #     img_crop,
-                # )
+                cv2.imwrite(
+                    f"./results/crop/{pdf_file.stem}_{np.random.randint(500)}.jpg",
+                    img_crop,
+                )
 
                 result = ocr([img_crop])
                 pages = result.export()["pages"]
