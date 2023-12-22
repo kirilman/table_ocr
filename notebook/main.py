@@ -59,7 +59,7 @@ class Table:
                 lst_X.append(item.copy())
             elif number_pos == 2:
                 lst_Y.append(item.copy())
-        print(f"Списки: {len(lst_number)} и {len(lst_X)} и {len(lst_Y)}")
+        # print(f"Списки: {len(lst_number)} и {len(lst_X)} и {len(lst_Y)}")
         self.lst_number = sorted(lst_number, key=lambda d: d["y_c"])
         lst_X = sorted(lst_X, key=lambda d: d["y_c"])
         lst_Y = sorted(lst_Y, key=lambda d: d["y_c"])
@@ -78,7 +78,7 @@ class Table:
 
         self.lst_X = self.merge_paths_column_list(self.lst_X)
         self.lst_Y = self.merge_paths_column_list(self.lst_Y)
-        print(f"Списки: {len(self.lst_X)} и {len(self.lst_Y)}")
+        # print(f"Списки: {len(self.lst_X)} и {len(self.lst_Y)}")
         # проверка элементов to float
         # if len(self.lst_X) != len(self.lst_Y):
         #     for k,item in enumerate(self.lst_X):
@@ -389,7 +389,7 @@ def determine_score(arr):
     return score
 
 
-def correct_skew(image, delta=0.1, limit=5):
+def correct_skew(image, delta=0.1, limit=10):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.bitwise_not(gray)
     thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
@@ -614,10 +614,10 @@ def process_directory(root):
                 # x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                 img_crop = cv2.erode(img_crop, kernel=np.ones((2, 2), np.uint8))
                 # save crop
-                cv2.imwrite(
-                    f"./results/crop/{pdf_file.stem}_{np.random.randint(500)}.jpg",
-                    img_crop,
-                )
+                # cv2.imwrite(
+                #     f"./results/crop/{pdf_file.stem}_{np.random.randint(500)}.jpg",
+                #     img_crop,
+                # )
 
                 result = ocr([img_crop])
                 pages = result.export()["pages"]
@@ -661,9 +661,9 @@ def process_directory(root):
             # final_frame.to_csv(f"./results/{pdf_file.stem}.csv", index=False)
 
 
-# process_directory("./input/")
+process_directory("./input/")
 
-process_directory("/storage/reshetnikov/sber_table/dataset/hard/")
+# process_directory("/storage/reshetnikov/sber_table/dataset/hard/")
 # process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
 # process_directory("./bad_example/")
 #
