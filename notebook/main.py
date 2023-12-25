@@ -260,7 +260,7 @@ class Table:
             }
         )
         # drop item
-        df = df[df.X.apply(lambda x: True if len(str(x)) > 5 else False)]
+        df = df[df.X.apply(lambda x: True if len(str(x)) > 5 and x > 250000 else False)]
         df = df[df.Y.apply(lambda x: True if len(str(x)) > 5 else False)]
         return df
 
@@ -406,10 +406,10 @@ def sort_table_predict(predicts):
     for t_pred in predicts:
         x1, y1, x2, y2 = t_pred[:4].detach().cpu().numpy()
         list_pred.append({"x": x1, "y": y1, "pred": t_pred})
-    sort_by_x = sorted(list_pred, key=lambda x: x["x"])
+    sort_by_x = sorted(list_pred, key=lambda x: np.sqrt(x["x"] ** 2 + x["y"] ** 2))
     # print(sort_by_x)
     if len(sort_by_x) == 2:
-        if sort_by_x[0]["y"] > sort_by_x[1]["y"]:
+        if sort_by_x[0]["y"] > sort_by_x[1]["y"] and sort_by_x[1]["x"] < 736 / 2:
             return [x["pred"] for x in [sort_by_x[1], sort_by_x[0]]]  # переставить
         else:
             return [x["pred"] for x in sort_by_x]
@@ -417,11 +417,11 @@ def sort_table_predict(predicts):
     def sorted_with_y(list_items, sorted_list):
         if len(list_items) == 0:
             return sorted_list
-        min_x = list_items[0]["x"]
+        min_x = np.sqrt(list_items[0]["x"] ** 2 + list_items[0]["y"] ** 2)
         y_min = 10000
         min_item = list_items[0]
         for item in list_items:
-            if item["y"] < y_min and item["x"] < min_x:
+            if item["y"] < y_min and np.sqrt(item["x"] ** 2 + item["y"] ** 2) < min_x:
                 # if item["y"] < y_min:
                 y_min = item["y"]
                 min_item = item
@@ -464,20 +464,21 @@ def add_gaps_label(df):
     has_gap = False
     add_next = False
     df_dict = []
-
+    x_val = 1
+    y_val = 1
     for k, line in df.iterrows():
         if k == 0:
             x_val = line[0]
             y_val = line[1]
-            df.iloc[0, 2] = "O"
-            df_dict.append({"X": x_val, "Y": y_val, "L": "O"})
+            df.iloc[0, 2] = "О"
+            df_dict.append({"X": x_val, "Y": y_val, "L": "О"})
             continue
 
         if (x_val == line[0]) and (y_val == line[1]):
             has_gap = True
 
         if add_next:
-            df_dict.append({"X": line[0], "Y": line[1], "L": "K"})
+            df_dict.append({"X": line[0], "Y": line[1], "L": "К"})
             x_val = line[0]
             y_val = line[1]
             add_next = False
@@ -530,12 +531,25 @@ def process_directory(root):
         path2model = str(p)
         print(p)
     model = ort.InferenceSession(path2model)
+
     ocr = ocr_predictor(
+        det_arch="db_resnet50",
         reco_arch="crnn_mobilenet_v3_large",
         pretrained=True,
         detect_language=True,
         detect_orientation=False,
     )
+    checkpoint = torch.load(
+        "../doctr/db_resnet50_20231225-175311.pt", map_location="cuda"
+    )
+    ocr.det_predictor.model.load_state_dict(checkpoint)
+
+    # ocr = ocr_predictor(
+    #     reco_arch="crnn_mobilenet_v3_large",
+    #     pretrained=True,
+    #     detect_language=True,
+    #     detect_orientation=False,
+    # )
 
     result_path = Path("./results")
     if result_path.exists():
@@ -592,7 +606,7 @@ def process_directory(root):
             # preds = model.predict(img, classes = [0]) Yolo
 
             predict = non_max_suppression(
-                torch.tensor(outputs[0]), conf_thres=0.6, iou_thres=0.2
+                torch.tensor(outputs[0]), conf_thres=0.5, iou_thres=0.1
             )[0]
             _cls = predict[:, 5]
             table_predicts = predict[_cls == 0]
@@ -666,8 +680,7 @@ def process_directory(root):
 
 process_directory("./input/")
 
+# process_directory("./bad_example/")
+
 # process_directory("/storage/reshetnikov/sber_table/dataset/hard/")
 # process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
-# process_directory("./bad_example/")
-#
-# process_directory("/storage/reshetnikov/sber_table/notebook/val/")
