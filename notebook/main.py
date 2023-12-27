@@ -22,16 +22,26 @@ from pdf2image import convert_from_path
 
 IMAGE_EXTENTIONS = (".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".gif", ".webp")
 
+import warnings
+
+warnings.filterwarnings("ignore")
+
 
 class Table:
-    def __init__(self):
+    def __init__(self, model, image):
         self.arr_xpos = None
         self.arr_ypos = None
+        self.model = model
+        self.image = image
 
     def check_centers(self):
-        if abs(self.centers[1] - self.centers[0]) / self.centers[1] * 100 < 5:
+        if abs(self.centers[1] - self.centers[0]) / self.centers[1] * 100 < 10:
             print("Координаты для кластера '№ номер' и 'X' совпали")
-            self.centers[0] = 0.05
+            self.centers[0] = 0.01
+        if abs(self.centers[1] - self.centers[2]) / self.centers[1] * 100 < 10:
+            print("Координаты для кластера 'X' и 'Y' совпали")
+            self.centers[1] = self.centers[0]
+            self.centers[0] = 0.001
 
     def from_coords(self, list_coords):
         print(len(list_coords))
@@ -39,9 +49,13 @@ class Table:
         self.arr_xpos = np.array([x["x_c"] for x in list_coords])
         self.arr_ypos = np.array([x["y_c"] for x in list_coords])
         # центры класстеров по х для объектов
-        kmean = KMeans(3, n_init=1)
+        cluster_centers = np.array(
+            [[self.arr_xpos.min(), self.arr_xpos.mean(), self.arr_xpos.max()]]
+        ).T
+        kmean = KMeans(init=cluster_centers, n_clusters=3, n_init=1)
         kmean.fit(self.arr_xpos.reshape(-1, 1))
         self.centers = np.sort(kmean.cluster_centers_.T[0])
+
         self.check_centers()
 
         lst_number, lst_X, lst_Y = [], [], []
@@ -71,7 +85,8 @@ class Table:
 
         self.X_before = lst_X.copy()
         self.Y_before = lst_Y.copy()
-
+        # for x in self.X_before:
+        #     print(x)
         # if len(self.lst_X) != len(self.lst_Y):
         #     self.lst_X = self.connect_part_in_column(self.lst_X)
         #     self.lst_Y = self.connect_part_in_column(self.lst_Y)
@@ -327,7 +342,55 @@ class Table:
 
         for k, items in items_on_lvl.items():
             if len(items) > 1:
-                val = "".join([str(v["value"]) for v in items])
+                if len(items) > 2:
+                    print("Три пробела в цифре ", items)
+                # Соединить несколько боксов на уровне
+                # x_left = np.array([v["p_left"][0] for v in items])
+                # x_right = np.array([v["p_right"][0] for v in items])
+
+                # y_left = np.array([v["p_left"][1] for v in items])
+                # y_right = np.array([v["p_right"][1] for v in items])
+                # print(x_left, x_right, y_left, y_right)
+
+                # shape = self.image.shape
+                # h, w = shape[0], shape[1]
+                # r = abs((x_left.max() - x_left.min())) * 0.01
+                # x1 = int((x_left.min() - r) * w)
+                # y1 = int(y_left.min() * h)
+                # x2 = int((x_right.max() + r) * w)
+                # y2 = int(y_right.max() * h)
+                # img = self.image[y1:y2, x1:x2]
+                # cv2.imwrite(
+                #     f"./results/crop/crop_{x1}_{y1}.jpg",
+                #     img,
+                # )
+                # result = self.model([img])
+                # pages = result.export()["pages"]
+                # blocks = pages[0]["blocks"]
+                # # print(blocks[0]["lines"][0]["words"][0]["value"])
+                # for b in blocks:
+                #     for l in b["lines"]:
+                #         for w in l["words"]:
+                #             print(w["value"])
+
+                def merge_parths_value(parth_items):
+                    list_values = []
+                    for p in sorted(parth_items, key=lambda d: d["x_c"]):
+                        val = p["value"]
+                        if len(val) > 2:
+                            list_values.append(val)
+                        else:
+                            if val.isdigit():
+                                list_values.append(val)
+                            else:
+                                print("Не цифра ", val)
+                    return "".join(list_values)
+
+                new_val = merge_parths_value(items)
+                val = "".join(
+                    [str(v["value"]) for v in sorted(items, key=lambda d: d["x_c"])]
+                )
+
                 val = val.replace("-", "")
                 yc = np.array([v["y_c"] for v in items]).mean()
                 xc = np.array([v["x_c"] for v in items]).mean()
@@ -363,10 +426,23 @@ def preprocess_image(image):
         # convert the image from RGBA2RGB
         image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
     # image = letterbox_image(image)
-    # angle, image = correct_skew(image)
+    w, h, c = image.shape
+    image_resize = cv2.resize(image, (int(h / 2), int(w / 2)))
+
+    angle, image = correct_skew(image_resize)
+
+    cv2.imwrite(
+        f"./results/crop/skew_{np.random.randint(500)}.jpg",
+        image,
+    )
     image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 15)  #
     image = cv2.erode(image, kernel=np.ones((2, 2), np.uint8))  #
-    image = cv2.resize(image, (736, 736))
+    # image = cv2.resize(image, (736, 736))
+    image = letterbox_image(image)
+    cv2.imwrite(
+        f"./results/crop/skew_net_{np.random.randint(500)}.jpg",
+        image,
+    )
     image = image / image.max()
     image_norm = image.copy()
     batch = torch.tensor(image[np.newaxis, :], dtype=torch.float).permute(0, 3, 1, 2)
@@ -532,24 +608,24 @@ def process_directory(root):
         print(p)
     model = ort.InferenceSession(path2model)
 
+    # ocr = ocr_predictor(
+    #     det_arch="db_resnet50",
+    #     reco_arch="crnn_mobilenet_v3_large",
+    #     pretrained=True,
+    #     detect_language=False,
+    #     detect_orientation=False,
+    # )
+    # checkpoint = torch.load(
+    #     "../doctr/db_resnet50_20231225-175311.pt", map_location="cuda"
+    # )
+    # ocr.det_predictor.model.load_state_dict(checkpoint)
+
     ocr = ocr_predictor(
-        det_arch="db_resnet50",
         reco_arch="crnn_mobilenet_v3_large",
         pretrained=True,
         detect_language=True,
         detect_orientation=False,
     )
-    checkpoint = torch.load(
-        "../doctr/db_resnet50_20231225-175311.pt", map_location="cuda"
-    )
-    ocr.det_predictor.model.load_state_dict(checkpoint)
-
-    # ocr = ocr_predictor(
-    #     reco_arch="crnn_mobilenet_v3_large",
-    #     pretrained=True,
-    #     detect_language=True,
-    #     detect_orientation=False,
-    # )
 
     result_path = Path("./results")
     if result_path.exists():
@@ -596,7 +672,7 @@ def process_directory(root):
                 # img = Image.frombytes("RGB", [image.width, image.height], image.samples)
                 img = np.array(image)
 
-            batch, or_img = preprocess_image(img)
+            batch, or_img = preprocess_image(img) #ошибка letter box обратно в исходные координаты
             h_orig, w_orig = img.shape[:2]
             h_crop, w_crop = or_img.shape[:2]
             h_rate = h_orig / h_crop
@@ -623,7 +699,7 @@ def process_directory(root):
                     int(y2 * h_rate),
                 )
                 x1, y1, x2, y2
-                down_cor = int(abs(y2 - y1) * 0.025)
+                down_cor = int(abs(y2 - y1) * 0.02)
                 img_crop = img[y1 : y2 + down_cor, x1 - 10 : x2 + 10, :]
 
                 # yolo
@@ -631,6 +707,7 @@ def process_directory(root):
                 # x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                 img_crop = cv2.erode(img_crop, kernel=np.ones((2, 2), np.uint8))
                 # save crop
+
                 cv2.imwrite(
                     f"./results/crop/{pdf_file.stem}_{np.random.randint(500)}.jpg",
                     img_crop,
@@ -647,11 +724,18 @@ def process_directory(root):
                             p2 = np.array(w["geometry"][1])
                             centr = (p2 + p1) / 2
                             coords.append(
-                                {"value": w["value"], "x_c": centr[0], "y_c": centr[1]}
+                                {
+                                    "value": w["value"],
+                                    "x_c": centr[0],
+                                    "y_c": centr[1],
+                                    "p_left": p1,
+                                    "p_right": p2,
+                                    "confidence": w["confidence"],
+                                }
                             )
 
                 try:
-                    table = Table()
+                    table = Table(ocr, img_crop)
                     cells = table.from_coords(coords)
                     print(pdf_file)
                     if isinstance(img, np.ndarray):
@@ -668,7 +752,8 @@ def process_directory(root):
                             index=False,
                         )
                     num_table += 1
-                    tables.append(table)
+                    if len(table.lst_X) > 0:
+                        tables.append(table)
                 except Exception as e:
                     print("Неудалось", pdf_file, " ", e)
             # after tables t_pred
