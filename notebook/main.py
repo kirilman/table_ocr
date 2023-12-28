@@ -405,48 +405,60 @@ class Table:
         return new_items_list
 
 
+def letterxyxy2org(x1, y1, x2, y2, h_org, w_org, h_let, w_let, pad_h, pad_w, scale):
+    """
+    Конверт координаты бокса x1y1x2y2 из lettr изображения в x1y1x2y2 исходного изображения
+    """
+    xa1 = int(x1 / w_let * w_org - pad_w / scale)
+    ya1 = int(y1 / h_let * h_org - pad_h / scale)
+
+    xa2 = int(x2 / w_let * w_org - pad_w / scale)
+    ya2 = int(y2 / h_let * h_org - pad_h / scale)
+    return xa1, ya1, xa2, ya2
+
+
 def letterbox_image(image, expected_size=(736, 736)):
     ih, iw, _ = image.shape
     eh, ew = expected_size
     scale = min(eh / ih, ew / iw)
     nh = int(ih * scale)
     nw = int(iw * scale)
-
     image = cv2.resize(image, (nw, nh), interpolation=cv2.INTER_CUBIC)
     new_img = np.full((eh, ew, 3), 128, dtype="uint8")
     # fill new image with the resized image and centered it
     new_img[
         (eh - nh) // 2 : (eh - nh) // 2 + nh, (ew - nw) // 2 : (ew - nw) // 2 + nw, :
     ] = image.copy()
-    return new_img
+    step_h = (eh - nh) // 2
+    step_w = (ew - nw) // 2
+    return new_img, nh, nw, step_h, step_w, scale
 
 
-def preprocess_image(image):
+def preprocess_image(source_image):
+    """
+    return batch, image_norm, nh, nw, step_h, step_w, scale
+    """
+    image = source_image.copy()
     if image.shape[2] == 4:
         # convert the image from RGBA2RGB
         image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
     # image = letterbox_image(image)
     w, h, c = image.shape
-    image_resize = cv2.resize(image, (int(h / 2), int(w / 2)))
+    image_resize = cv2.resize(image, (int(h / 2.5), int(w / 2.5)))
+    image = rotate_image(image, get_angle_rotate(image_resize))
 
-    angle, image = correct_skew(image_resize)
-
-    cv2.imwrite(
-        f"./results/crop/skew_{np.random.randint(500)}.jpg",
-        image,
-    )
     image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 15)  #
     image = cv2.erode(image, kernel=np.ones((2, 2), np.uint8))  #
     # image = cv2.resize(image, (736, 736))
-    image = letterbox_image(image)
-    cv2.imwrite(
-        f"./results/crop/skew_net_{np.random.randint(500)}.jpg",
-        image,
-    )
+    image, nh, nw, step_h, step_w, scale = letterbox_image(image, (736, 736))
+    # cv2.imwrite(
+    #     f"./results/crop/skew_net_{np.random.randint(500)}.jpg",
+    #     image,
+    # )
     image = image / image.max()
     image_norm = image.copy()
     batch = torch.tensor(image[np.newaxis, :], dtype=torch.float).permute(0, 3, 1, 2)
-    return batch, image_norm
+    return batch, image_norm, nh, nw, step_h, step_w, scale
 
 
 def rotate_image(image, angle):
@@ -465,7 +477,7 @@ def determine_score(arr):
     return score
 
 
-def correct_skew(image, delta=0.1, limit=10):
+def get_angle_rotate(image, delta=0.1, limit=10):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.bitwise_not(gray)
     thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
@@ -473,8 +485,8 @@ def correct_skew(image, delta=0.1, limit=10):
     img_stack = np.stack([rotate_image(thresh, angle) for angle in angles], axis=0)
     scores = determine_score(img_stack)
     best_angle = angles[np.argmax(scores)]
-    corrected = rotate_image(image, best_angle)
-    return best_angle, corrected
+    # corrected = rotate_image(image, best_angle)
+    return best_angle
 
 
 def sort_table_predict(predicts):
@@ -672,11 +684,14 @@ def process_directory(root):
                 # img = Image.frombytes("RGB", [image.width, image.height], image.samples)
                 img = np.array(image)
 
-            batch, or_img = preprocess_image(img) #ошибка letter box обратно в исходные координаты
+            batch, or_img, nh, nw, step_h, step_w, scale = preprocess_image(
+                img
+            )  # ошибка letter box обратно в исходные координаты
+
             h_orig, w_orig = img.shape[:2]
-            h_crop, w_crop = or_img.shape[:2]
-            h_rate = h_orig / h_crop
-            w_rate = w_orig / w_crop
+            # h_crop, w_crop = or_img.shape[:2]
+            # h_rate = h_orig / h_crop
+            # w_rate = w_orig / w_crop
             outputs = model.run(None, {"images": batch.numpy()})  # Print Result
 
             # preds = model.predict(img, classes = [0]) Yolo
@@ -690,15 +705,20 @@ def process_directory(root):
             table_predict = sort_table_predict(table_predicts)
 
             for t_pred in table_predict:
-                x1, y1, x2, y2 = t_pred[:4]
-
-                x1, y1, x2, y2 = (
-                    int(x1 * w_rate),
-                    int(y1 * h_rate),
-                    int(x2 * w_rate),
-                    int(y2 * h_rate),
+                xl1, yl1, xl2, yl2 = t_pred[:4]
+                x1, y1, x2, y2 = letterxyxy2org(
+                    np.float64(xl1),
+                    np.float64(yl1),
+                    np.float64(xl2),
+                    np.float64(yl2),
+                    h_orig,
+                    w_orig,
+                    nh,
+                    nw,
+                    step_h,
+                    step_w,
+                    scale,
                 )
-                x1, y1, x2, y2
                 down_cor = int(abs(y2 - y1) * 0.02)
                 img_crop = img[y1 : y2 + down_cor, x1 - 10 : x2 + 10, :]
 
@@ -708,10 +728,10 @@ def process_directory(root):
                 img_crop = cv2.erode(img_crop, kernel=np.ones((2, 2), np.uint8))
                 # save crop
 
-                cv2.imwrite(
-                    f"./results/crop/{pdf_file.stem}_{np.random.randint(500)}.jpg",
-                    img_crop,
-                )
+                # cv2.imwrite(
+                #     f"./results/crop/{Path(pdf_file).stem}_{np.random.randint(500)}.jpg",
+                #     img_crop,
+                # )
 
                 result = ocr([img_crop])
                 pages = result.export()["pages"]
@@ -763,9 +783,9 @@ def process_directory(root):
             # final_frame.to_csv(f"./results/{pdf_file.stem}.csv", index=False)
 
 
-process_directory("./input/")
+# process_directory("./input/")
 
 # process_directory("./bad_example/")
 
 # process_directory("/storage/reshetnikov/sber_table/dataset/hard/")
-# process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
+process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
