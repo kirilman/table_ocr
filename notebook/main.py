@@ -35,10 +35,10 @@ class Table:
         self.image = image
 
     def check_centers(self):
-        if abs(self.centers[1] - self.centers[0]) / self.centers[1] * 100 < 10:
+        if abs(self.centers[1] - self.centers[0]) / self.centers[1] * 100 < 20:
             print("Координаты для кластера '№ номер' и 'X' совпали")
             self.centers[0] = 0.01
-        if abs(self.centers[1] - self.centers[2]) / self.centers[1] * 100 < 10:
+        if abs(self.centers[1] - self.centers[2]) / self.centers[1] * 100 < 20:
             print("Координаты для кластера 'X' и 'Y' совпали")
             self.centers[1] = self.centers[0]
             self.centers[0] = 0.001
@@ -55,7 +55,7 @@ class Table:
         kmean = KMeans(init=cluster_centers, n_clusters=3, n_init=1)
         kmean.fit(self.arr_xpos.reshape(-1, 1))
         self.centers = np.sort(kmean.cluster_centers_.T[0])
-
+        print(self.centers, (self.centers[1] - self.centers[0]) / self.centers[1])
         self.check_centers()
 
         lst_number, lst_X, lst_Y = [], [], []
@@ -345,33 +345,26 @@ class Table:
                 if len(items) > 2:
                     print("Три пробела в цифре ", items)
                 # Соединить несколько боксов на уровне
-                # x_left = np.array([v["p_left"][0] for v in items])
-                # x_right = np.array([v["p_right"][0] for v in items])
+                x_left = np.array([v["p_left"][0] for v in items])
+                x_right = np.array([v["p_right"][0] for v in items])
 
-                # y_left = np.array([v["p_left"][1] for v in items])
-                # y_right = np.array([v["p_right"][1] for v in items])
-                # print(x_left, x_right, y_left, y_right)
+                y_left = np.array([v["p_left"][1] for v in items])
+                y_right = np.array([v["p_right"][1] for v in items])
 
-                # shape = self.image.shape
-                # h, w = shape[0], shape[1]
-                # r = abs((x_left.max() - x_left.min())) * 0.01
-                # x1 = int((x_left.min() - r) * w)
-                # y1 = int(y_left.min() * h)
-                # x2 = int((x_right.max() + r) * w)
-                # y2 = int(y_right.max() * h)
-                # img = self.image[y1:y2, x1:x2]
-                # cv2.imwrite(
-                #     f"./results/crop/crop_{x1}_{y1}.jpg",
-                #     img,
-                # )
-                # result = self.model([img])
-                # pages = result.export()["pages"]
-                # blocks = pages[0]["blocks"]
-                # # print(blocks[0]["lines"][0]["words"][0]["value"])
-                # for b in blocks:
-                #     for l in b["lines"]:
-                #         for w in l["words"]:
-                #             print(w["value"])
+                shape = self.image.shape
+                h, w = shape[0], shape[1]
+                r = abs((x_left.max() - x_left.min())) * 0.01
+                x1 = int((x_left.min() - r) * w)
+                y1 = int(y_left.min() * h)
+                x2 = int((x_right.max() + r) * w)
+                y2 = int(y_right.max() * h)
+                img = self.image[y1:y2, x1:x2]
+                cv2.imwrite(
+                    f"./results/crop/crop_{x1}_{y1}.jpg",
+                    img,
+                )
+                result = self.model.reco_predictor([img])
+                val = result[0][0]
 
                 def merge_parths_value(parth_items):
                     list_values = []
@@ -386,12 +379,12 @@ class Table:
                                 print("Не цифра ", val)
                     return "".join(list_values)
 
-                new_val = merge_parths_value(items)
-                val = "".join(
-                    [str(v["value"]) for v in sorted(items, key=lambda d: d["x_c"])]
-                )
+                # new_val = merge_parths_value(items)
+                # val = "".join(
+                #     [str(v["value"]) for v in sorted(items, key=lambda d: d["x_c"])]
+                # )
 
-                val = val.replace("-", "")
+                # val = val.replace("-", "")
                 yc = np.array([v["y_c"] for v in items]).mean()
                 xc = np.array([v["x_c"] for v in items]).mean()
                 new_items_list.append({"value": val, "x_c": xc, "y_c": yc})
