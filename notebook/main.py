@@ -48,9 +48,16 @@ class Table:
         # центры класстеров по x coorditane каждого разпознаного объекта
         self.arr_xpos = np.array([x["x_c"] for x in list_coords])
         self.arr_ypos = np.array([x["y_c"] for x in list_coords])
+
         # центры класстеров по х для объектов
         cluster_centers = np.array(
-            [[self.arr_xpos.min(), self.arr_xpos.mean(), self.arr_xpos.max()]]
+            [
+                [
+                    self.arr_xpos.min(),
+                    self.arr_xpos.mean(),
+                    np.sort(self.arr_xpos)[len(self.arr_xpos) // 2 :].max(),
+                ]
+            ]
         ).T
         kmean = KMeans(init=cluster_centers, n_clusters=3, n_init=1)
         kmean.fit(self.arr_xpos.reshape(-1, 1))
@@ -63,8 +70,8 @@ class Table:
             number_pos = np.argmin(
                 [
                     abs(item["x_c"] - self.centers[0]),
-                    abs(item["x_c"] - self.centers[1]),
-                    abs(item["x_c"] - self.centers[2]),
+                    abs((item["x_c"]) - self.centers[1]),
+                    abs((item["x_c"] + item["p_right"][0]) / 2 - self.centers[2]),
                 ]
             )
             if number_pos == 0:
@@ -113,7 +120,7 @@ class Table:
         #         self.lst_X[k]['value'] = self.string_to_float(x_item['value'])
         #         self.lst_Y[k]['value'] = self.string_to_float(y_item['value'])
 
-        print(f"Списки: {len(self.lst_X)} и {len(self.lst_Y)}")
+        # print(f"Списки: {len(self.lst_X)} и {len(self.lst_Y)}")
         self._create_cells(self.lst_number, self.lst_X, self.lst_Y)
 
         # to float
@@ -470,7 +477,7 @@ def determine_score(arr):
     return score
 
 
-def get_angle_rotate(image, delta=0.1, limit=10):
+def get_angle_rotate(image, delta=0.2, limit=4):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.bitwise_not(gray)
     thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
@@ -491,7 +498,8 @@ def sort_table_predict(predicts):
     # print(sort_by_x)
     if len(sort_by_x) == 2:
         if sort_by_x[0]["y"] > sort_by_x[1]["y"] and sort_by_x[1]["x"] < 736 / 2:
-            return [x["pred"] for x in [sort_by_x[1], sort_by_x[0]]]  # переставить
+            print("переставить")
+            return [x["pred"] for x in [sort_by_x[0], sort_by_x[1]]]  # переставить!!!
         else:
             return [x["pred"] for x in sort_by_x]
 
@@ -604,6 +612,29 @@ def save_table(tables, save_path, f_name):
     )
 
 
+def collect_ocr_result(result):
+    pages = result.export()["pages"]
+    blocks = pages[0]["blocks"]
+    coords = []
+    for b in blocks:
+        for l in b["lines"]:
+            for w in l["words"]:
+                p1 = np.array(w["geometry"][0])
+                p2 = np.array(w["geometry"][1])
+                centr = (p2 + p1) / 2
+                coords.append(
+                    {
+                        "value": w["value"],
+                        "x_c": centr[0],
+                        "y_c": centr[1],
+                        "p_left": p1,
+                        "p_right": p2,
+                        "confidence": w["confidence"],
+                    }
+                )
+    return coords
+
+
 def process_directory(root):
     root = Path(root)
     print(os.getcwd())
@@ -621,7 +652,7 @@ def process_directory(root):
     #     detect_orientation=False,
     # )
     # checkpoint = torch.load(
-    #     "../doctr/db_resnet50_20231225-175311.pt", map_location="cuda"
+    #     "../doctr/db_resnet50_20240110-162426.pt", map_location="cuda"
     # )
     # ocr.det_predictor.model.load_state_dict(checkpoint)
 
@@ -696,7 +727,7 @@ def process_directory(root):
             table_predicts = predict[_cls == 0]
 
             table_predict = sort_table_predict(table_predicts)
-
+            bad_quality = False
             for t_pred in table_predict:
                 xl1, yl1, xl2, yl2 = t_pred[:4]
                 x1, y1, x2, y2 = letterxyxy2org(
@@ -718,7 +749,7 @@ def process_directory(root):
                 # yolo
                 # x1,y1, x2, y2 = b.xyxy.detach().cpu().numpy()[0]
                 # x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-                img_crop = cv2.erode(img_crop, kernel=np.ones((2, 2), np.uint8))
+                # img_crop = cv2.erode(img_crop, kernel=np.ones((2, 2), np.uint8))
                 # save crop
 
                 # cv2.imwrite(
@@ -727,25 +758,20 @@ def process_directory(root):
                 # )
 
                 result = ocr([img_crop])
-                pages = result.export()["pages"]
-                blocks = pages[0]["blocks"]
-                coords = []
-                for b in blocks:
-                    for l in b["lines"]:
-                        for w in l["words"]:
-                            p1 = np.array(w["geometry"][0])
-                            p2 = np.array(w["geometry"][1])
-                            centr = (p2 + p1) / 2
-                            coords.append(
-                                {
-                                    "value": w["value"],
-                                    "x_c": centr[0],
-                                    "y_c": centr[1],
-                                    "p_left": p1,
-                                    "p_right": p2,
-                                    "confidence": w["confidence"],
-                                }
-                            )
+                coords = collect_ocr_result(result)
+                # cчитаем уверенность сети
+                score_one = np.array([x["confidence"] for x in coords]).mean()
+
+                if score_one < 0.91:
+                    print("Низкое качество")
+                    bad_quality = True
+                else:
+                    img_crop = cv2.erode(img_crop, kernel=np.ones((2, 2), np.uint8))
+                    result = ocr([img_crop])
+                    coords2 = collect_ocr_result(result)
+                    score = np.array([x["confidence"] for x in coords]).mean()
+                    if score > score_one:
+                        coords = coords2
 
                 try:
                     table = Table(ocr, img_crop)
@@ -771,14 +797,20 @@ def process_directory(root):
                     print("Неудалось", pdf_file, " ", e)
             # after tables t_pred
         if len(tables) > 0:
-            save_table(tables, "./results", pdf_file.stem)
+            if bad_quality:
+                file_name = f"Плохое качество_{pdf_file.stem}"
+            else:
+                file_name = pdf_file.stem
+
+            file_name = pdf_file.stem
+            save_table(tables, "./results", file_name)
             # final_frame = pd.concat(2, axis=0)
             # final_frame.to_csv(f"./results/{pdf_file.stem}.csv", index=False)
 
 
 # process_directory("./input/")
 
-# process_directory("./bad_example/")
+process_directory("./bad_example/")
 
 # process_directory("/storage/reshetnikov/sber_table/dataset/hard/")
-process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
+# process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
