@@ -583,6 +583,15 @@ def add_gaps_label(df):
     return pd.DataFrame(df_dict)
 
 
+def check_coords_y(df):
+    val = []
+    start = ["142", "143", "144", "145", "146", "147", "148", "149", "150", "151"]
+    last = str(df.Y.iloc[0])[:3]
+    for i, x in enumerate(df.Y):
+        if not str(x)[:3] in start:
+            df.loc[i, "Y"] = float(last + str(x)[:3])
+
+
 def save_table(tables, save_path, f_name):
     if len(tables) == 1:
         final_frame = pd.concat([t.frame for t in tables], axis=0)
@@ -602,6 +611,8 @@ def save_table(tables, save_path, f_name):
     final_frame = final_frame.astype(str)
     # final_frame["X"] = final_frame["X"].apply(lambda x: x.replace(".", ","))
     # final_frame["Y"] = final_frame["Y"].apply(lambda x: x.replace(".", ","))
+
+    # check_coords_y(final_frame)
     final_frame = add_gaps_label(final_frame)
     final_frame.to_excel(
         Path(save_path) / f"{f_name}.xlsx",
@@ -676,7 +687,7 @@ def process_directory(root):
         try:
             images = []
 
-            dpi = 200  # choose desired dpi here
+            dpi = 180  # choose desired dpi here
             zoom = dpi / 72  # zoom factor, standard: 72 dpi
             magnify = fitz.Matrix(zoom, zoom)  # magnifies in x, resp. y direction
             doc = fitz.open(pdf_file)  # open document
@@ -802,15 +813,15 @@ def process_directory(root):
             else:
                 file_name = pdf_file.stem
 
-            file_name = pdf_file.stem
+            # file_name = pdf_file.stem
             save_table(tables, "./results", file_name)
             # final_frame = pd.concat(2, axis=0)
             # final_frame.to_csv(f"./results/{pdf_file.stem}.csv", index=False)
 
 
-# process_directory("./input/")
+process_directory("./input/")
 
-process_directory("./bad_example/")
+# process_directory("./bad_example/")
 
 # process_directory("/storage/reshetnikov/sber_table/dataset/hard/")
 # process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
