@@ -27,6 +27,14 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
+def isfloat(s):
+    try:
+        float(s)
+        return True
+    except:
+        return False
+
+
 class Table:
     def __init__(self, model, image):
         self.arr_xpos = None
@@ -42,12 +50,32 @@ class Table:
             print("Координаты для кластера 'X' и 'Y' совпали")
             self.centers[1] = self.centers[0]
             self.centers[0] = 0.001
+        d1 = abs(self.centers[1] - self.centers[0])
+        d2 = abs(self.centers[2] - self.centers[1])
+        if d1 / d2 < 0.22:
+            print("Отношение сторон")
+            if d1 < d2:
+                self.centers[0] = 0.001
+            else:
+                self.centers[2] = 1
+                self.centers[1] = (self.centers[0] + self.centers[1]) / 2
+                self.centers[0] = 0.001
 
     def from_coords(self, list_coords):
-        print(len(list_coords))
+        list_float = []
+        for x in list_coords:
+            try:
+                if float(x["value"].replace(",", ".")):
+                    list_float.append(x)
+            except:
+                pass
         # центры класстеров по x coorditane каждого разпознаного объекта
-        self.arr_xpos = np.array([x["x_c"] for x in list_coords])
-        self.arr_ypos = np.array([x["y_c"] for x in list_coords])
+        if len(list_float) > 2:
+            self.arr_xpos = np.array([x["x_c"] for x in list_float])
+            self.arr_ypos = np.array([x["y_c"] for x in list_float])
+        else:
+            self.arr_xpos = np.array([x["x_c"] for x in list_coords])
+            self.arr_ypos = np.array([x["y_c"] for x in list_coords])
 
         # центры класстеров по х для объектов
         cluster_centers = np.array(
@@ -62,7 +90,7 @@ class Table:
         kmean = KMeans(init=cluster_centers, n_clusters=3, n_init=1)
         kmean.fit(self.arr_xpos.reshape(-1, 1))
         self.centers = np.sort(kmean.cluster_centers_.T[0])
-        print(self.centers, (self.centers[1] - self.centers[0]) / self.centers[1])
+        # print(self.centers, (self.centers[1] - self.centers[0]) / self.centers[1])
         self.check_centers()
 
         lst_number, lst_X, lst_Y = [], [], []
@@ -138,25 +166,37 @@ class Table:
         return self.cells
 
     def _create_cells(self, lst_number, lst_X, lst_Y):
-        if len(lst_X) == len(lst_Y):
-            self.cells = [[None for j in range(3)] for i in range(len(lst_X))]
-            for i, (x_v, y_v) in enumerate(zip(lst_X, lst_Y)):
-                self.cells[i][0] = self.get_nearest_number(x_v)
-                self.cells[i][1] = x_v
-                self.cells[i][2] = y_v
+        number_line = max(len(lst_X), len(lst_Y))
+        self.cells = [[None for j in range(3)] for i in range(number_line)]
+        if len(lst_X) > len(lst_Y):
+            for k, item in enumerate(lst_X):
+                self.cells[k][0] = self.get_nearest_number(item)
+                self.cells[k][1] = item
+                self.cells[k][2] = self.get_nearest_item_in_table(item, lst_Y)
         else:
-            number_line = max(len(lst_X), len(lst_Y))
-            self.cells = [[None for j in range(3)] for i in range(number_line)]
-            if len(lst_X) > len(lst_Y):
-                for k, item in enumerate(lst_X):
-                    self.cells[k][0] = self.get_nearest_number(item)
-                    self.cells[k][1] = item
-                    self.cells[k][2] = self.get_nearest_item_in_table(item, lst_Y)
-            else:
-                for k, item in enumerate(lst_Y):
-                    self.cells[k][0] = self.get_nearest_number(item)
-                    self.cells[k][1] = self.get_nearest_item_in_table(item, lst_X)
-                    self.cells[k][2] = item
+            for k, item in enumerate(lst_Y):
+                self.cells[k][0] = self.get_nearest_number(item)
+                self.cells[k][1] = self.get_nearest_item_in_table(item, lst_X)
+                self.cells[k][2] = item
+        # if len(lst_X) == len(lst_Y):
+        #     self.cells = [[None for j in range(3)] for i in range(len(lst_X))]
+        #     for i, (x_v, y_v) in enumerate(zip(lst_X, lst_Y)):
+        #         self.cells[i][0] = self.get_nearest_number(x_v)
+        #         self.cells[i][1] = x_v
+        #         self.cells[i][2] = y_v
+        # else:
+        #     number_line = max(len(lst_X), len(lst_Y))
+        #     self.cells = [[None for j in range(3)] for i in range(number_line)]
+        #     if len(lst_X) > len(lst_Y):
+        #         for k, item in enumerate(lst_X):
+        #             self.cells[k][0] = self.get_nearest_number(item)
+        #             self.cells[k][1] = item
+        #             self.cells[k][2] = self.get_nearest_item_in_table(item, lst_Y)
+        #     else:
+        #         for k, item in enumerate(lst_Y):
+        #             self.cells[k][0] = self.get_nearest_number(item)
+        #             self.cells[k][1] = self.get_nearest_item_in_table(item, lst_X)
+        #             self.cells[k][2] = item
         return self.cells
 
     @property
@@ -282,7 +322,13 @@ class Table:
             }
         )
         # drop item
-        df = df[df.X.apply(lambda x: True if len(str(x)) > 5 and x > 250000 else False)]
+        df = df[
+            df.X.apply(
+                lambda x: True
+                if len(str(x)) > 5 and x > 250000 and x < 5000000
+                else False
+            )
+        ]
         df = df[df.Y.apply(lambda x: True if len(str(x)) > 5 else False)]
         return df
 
@@ -290,6 +336,9 @@ class Table:
     def string_to_float(string):
         if type(string) == float:
             return string
+        if type(string) == int:
+            return string
+
         result = string
         result = result.replace("/", "7")
         result = result.replace("B", "3")
@@ -349,8 +398,8 @@ class Table:
 
         for k, items in items_on_lvl.items():
             if len(items) > 1:
-                if len(items) > 2:
-                    print("Три пробела в цифре ", items)
+                # if len(items) > 2:
+                #     print("Три пробела в цифре ", items)
                 # Соединить несколько боксов на уровне
                 x_left = np.array([v["p_left"][0] for v in items])
                 x_right = np.array([v["p_right"][0] for v in items])
@@ -450,7 +499,7 @@ def preprocess_image(source_image):
     image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 15)  #
     image = cv2.erode(image, kernel=np.ones((2, 2), np.uint8))  #
     # image = cv2.resize(image, (736, 736))
-    image, nh, nw, step_h, step_w, scale = letterbox_image(image, (736, 736))
+    image, nh, nw, step_h, step_w, scale = letterbox_image(image, (1024, 1024))
     # cv2.imwrite(
     #     f"./results/crop/skew_net_{np.random.randint(500)}.jpg",
     #     image,
@@ -526,6 +575,17 @@ def sort_table_predict(predicts):
     return [x["pred"] for x in sorted_predict]
 
 
+def list_float_values(coords):
+    list_float = []
+    for x in coords:
+        try:
+            if float(x["value"].replace(",", ".")):
+                list_float.append(x)
+        except:
+            pass
+    return list_float
+
+
 def drop_last_line(_df):
     df = _df.frame.copy()
     # if all(df.iloc[-1, 1:] == df.iloc[0, 1:]):
@@ -549,6 +609,7 @@ def add_gaps_label(df):
     Добавить метку начала и конца полигона для полигонов внутри одной таблицы
     """
     # print(df)
+    df = df.reset_index(drop=True)
     df["O"] = np.nan
     has_gap = False
     add_next = False
@@ -594,7 +655,8 @@ def check_coords_y(df):
 
 def save_table(tables, save_path, f_name):
     if len(tables) == 1:
-        final_frame = pd.concat([t.frame for t in tables], axis=0)
+        # final_frame = pd.concat([t.frame for t in tables], axis=0)
+        final_frame = tables[0].frame
         # выкидывает последную координату
         # if all(final_frame.iloc[-1, 1:] == final_frame.iloc[0, 1:]):
         #    final_frame = final_frame[:-1]
@@ -646,6 +708,45 @@ def collect_ocr_result(result):
     return coords
 
 
+def correct_vertical_dim_table(image, y_low, y_high, check_discrepancy):
+    """
+    Уточнить вертикальные размеры таблицы
+    """
+    value = 1000 / (image[:, :, 0].sum(axis=1) + 1)
+    quantile = np.quantile(value, 0.97)
+    value[value > quantile] = quantile
+    y_low += 1
+    max_v = np.sort(value)[-25:].mean()
+    index_start = 0
+    index_last = 1
+    for i, x in enumerate(value):
+        # не работает
+        if abs(x - max_v) / (value.max() - value.min() + 0.001) * 100 < 15:
+            if index_start == 0:
+                index_start = i
+            index_last = i
+    if index_start > y_low:
+        index_start = y_low
+    if index_last < y_high:
+        index_last = y_high
+    # если сильно большое расхождение по высоте
+    print(index_start, y_low, index_last, y_high)
+    if check_discrepancy:
+        if index_start / y_low * 100 < 30:
+            delta = (y_low - index_start) * 0.3
+            print(delta, (y_high - y_low))
+            if delta > abs(y_high - y_low):
+                delta = abs(y_high - y_low)
+            index_start = int(y_low - delta * 0.3)
+
+        if y_high / index_last * 100 > 30:
+            delta = abs((index_last - y_high)) * 0.3
+            if delta > abs(y_high - y_low):
+                delta = abs(y_high - y_low)
+            index_last = int(y_high + delta * 0.3)
+    return index_start, index_last
+
+
 def process_directory(root):
     root = Path(root)
     print(os.getcwd())
@@ -681,8 +782,13 @@ def process_directory(root):
         result_path.mkdir()
     files = list(Path(root).rglob("*.pdf"))
     if len(files) == 0:
-        files = ["1"]
-    print(len(files))
+        files = list(Path(root).rglob("*"))
+        files = list(
+            filter(
+                lambda x: True if x.suffix in IMAGE_EXTENTIONS else False, files
+            )
+        )
+    print("Количество файлов ", len(files))
     for pdf_file in files:
         try:
             images = []
@@ -702,16 +808,18 @@ def process_directory(root):
             #     poppler_path="./poppler-23.11.0/Library/bin",
             # )
         except Exception as e:
-            images = list(Path(root).rglob("*"))
-            images = list(
-                filter(
-                    lambda x: True if x.suffix in IMAGE_EXTENTIONS else False, images
-                )
-            )
-            print(e)
+            # images = list(Path(root).rglob("*"))
+            # images = list(
+            #     filter(
+            #         lambda x: True if x.suffix in IMAGE_EXTENTIONS else False, images
+            #     )
+            # )
+            # print(e)
+            images = [cv2.imread(pdf_file)]
 
         num_table = 0
         tables = []
+        total_quality = False
         for image in images:
             if isinstance(image, Path):
                 img = cv2.imread(str(image))
@@ -739,7 +847,12 @@ def process_directory(root):
 
             table_predict = sort_table_predict(table_predicts)
             bad_quality = False
+
+            last_table_df = None
             for t_pred in table_predict:
+                # if len(table_predict)>2:
+                #     if
+
                 xl1, yl1, xl2, yl2 = t_pred[:4]
                 x1, y1, x2, y2 = letterxyxy2org(
                     np.float64(xl1),
@@ -754,33 +867,55 @@ def process_directory(root):
                     step_w,
                     scale,
                 )
-                down_cor = int(abs(y2 - y1) * 0.02)
-                img_crop = img[y1 : y2 + down_cor, x1 - 10 : x2 + 10, :]
+                down_cor = int(abs(y2 - y1) * 0.05)
+                # img_crop = img[y1 - down_cor : y2 + down_cor, x1 - 10 : x2 + 10, :]
 
+                y_low = y1 - down_cor if y1 - down_cor > 0 else 0
+                y_high = y2 + down_cor if y2 + down_cor < h_orig else h_orig
+
+                if len(table_predict) == 1:
+                    index_start, index_last = correct_vertical_dim_table(
+                        img[:, x1:x2], y_low, y_high, True
+                    )
+                else:
+                    index_start, index_last = correct_vertical_dim_table(
+                        img[:, x1:x2], y_low, y_high, False
+                    )
+
+                img_crop = img[index_start:index_last, x1:x2]
                 # yolo
                 # x1,y1, x2, y2 = b.xyxy.detach().cpu().numpy()[0]
                 # x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                 # img_crop = cv2.erode(img_crop, kernel=np.ones((2, 2), np.uint8))
                 # save crop
 
-                # cv2.imwrite(
-                #     f"./results/crop/{Path(pdf_file).stem}_{np.random.randint(500)}.jpg",
-                #     img_crop,
-                # )
+                cv2.imwrite(
+                    f"./results/crop/{Path(pdf_file).stem}_{np.random.randint(500)}.jpg",
+                    img_crop,
+                )
+                try:
+                    result = ocr([img_crop])
+                    coords = collect_ocr_result(result)
+                    # cчитаем уверенность сети
+                    score_one = np.array(
+                        [x["confidence"] for x in list_float_values(coords)]
+                    ).mean()
+                except Exception as e:
+                    print("Неудалось", pdf_file, " ", e)
+                    continue
 
-                result = ocr([img_crop])
-                coords = collect_ocr_result(result)
-                # cчитаем уверенность сети
-                score_one = np.array([x["confidence"] for x in coords]).mean()
-
-                if score_one < 0.91:
+                if score_one < 0.93:
                     print("Низкое качество")
                     bad_quality = True
+                    total_quality = True
                 else:
                     img_crop = cv2.erode(img_crop, kernel=np.ones((2, 2), np.uint8))
                     result = ocr([img_crop])
                     coords2 = collect_ocr_result(result)
-                    score = np.array([x["confidence"] for x in coords]).mean()
+
+                    score = np.array(
+                        [x["confidence"] for x in list_float_values(coords2)]
+                    ).mean()
                     if score > score_one:
                         coords = coords2
 
@@ -803,12 +938,26 @@ def process_directory(root):
                         )
                     num_table += 1
                     if len(table.lst_X) > 0:
-                        tables.append(table)
+                        if isinstance(last_table_df, pd.DataFrame):
+                            df = table.frame
+                            if len(last_table_df) != len(df):  # совпадение
+                                last_table_df = df
+                                tables.append(table)
+                            else:
+                                if last_table_df.X.tolist() == df.X.tolist():
+                                    print("Совпадение таблиц")
+                                else:
+                                    last_table_df = df
+                                    tables.append(table)
+                        else:
+                            tables.append(table)
+                            last_table_df = table.frame
+
                 except Exception as e:
                     print("Неудалось", pdf_file, " ", e)
             # after tables t_pred
         if len(tables) > 0:
-            if bad_quality:
+            if total_quality:
                 file_name = f"Плохое качество_{pdf_file.stem}"
             else:
                 file_name = pdf_file.stem
@@ -819,9 +968,9 @@ def process_directory(root):
             # final_frame.to_csv(f"./results/{pdf_file.stem}.csv", index=False)
 
 
-process_directory("./input/")
+# process_directory("./input/")
 
-# process_directory("./bad_example/")
+process_directory("./bad_example/")
 
 # process_directory("/storage/reshetnikov/sber_table/dataset/hard/")
 # process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
