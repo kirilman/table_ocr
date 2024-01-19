@@ -767,13 +767,29 @@ def process_directory(root):
     #     "../doctr/db_resnet50_20240110-162426.pt", map_location="cuda"
     # )
     # ocr.det_predictor.model.load_state_dict(checkpoint)
+    try:
+        ocr = ocr_predictor(
+            reco_arch="crnn_mobilenet_v3_large",
+            pretrained=False,
+            detect_language=True,
+            detect_orientation=False,
+        )
 
-    ocr = ocr_predictor(
-        reco_arch="crnn_mobilenet_v3_large",
-        pretrained=True,
-        detect_language=True,
-        detect_orientation=False,
-    )
+        checkpoint_head = torch.load(
+            "./crnn_mobilenet_v3_large_pt-f5259ec2.pt", map_location="cuda"
+        )
+        checkpoint_dec = torch.load("./db_resnet50-ac60cadc.pt", map_location="cuda")
+
+        ocr.det_predictor.model.load_state_dict(checkpoint_dec)
+        ocr.reco_predictor.model.load_state_dict(checkpoint_head)
+        print("Модель распознавания текста загружена")
+    except Exception as e:
+        ocr = ocr_predictor(
+            reco_arch="crnn_mobilenet_v3_large",
+            pretrained=False,
+            detect_language=True,
+            detect_orientation=False,
+        )
 
     result_path = Path("./results")
     if result_path.exists():
@@ -784,9 +800,7 @@ def process_directory(root):
     if len(files) == 0:
         files = list(Path(root).rglob("*"))
         files = list(
-            filter(
-                lambda x: True if x.suffix in IMAGE_EXTENTIONS else False, files
-            )
+            filter(lambda x: True if x.suffix in IMAGE_EXTENTIONS else False, files)
         )
     print("Количество файлов ", len(files))
     for pdf_file in files:
@@ -904,7 +918,7 @@ def process_directory(root):
                     print("Неудалось", pdf_file, " ", e)
                     continue
 
-                if score_one < 0.93:
+                if score_one < 0.94:
                     print("Низкое качество")
                     bad_quality = True
                     total_quality = True
@@ -970,7 +984,7 @@ def process_directory(root):
 
 # process_directory("./input/")
 
-process_directory("./bad_example/")
+# process_directory("./bad_example/")
 
 # process_directory("/storage/reshetnikov/sber_table/dataset/hard/")
-# process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
+process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
