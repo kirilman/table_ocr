@@ -11,6 +11,7 @@ from nms import non_max_suppression
 import onnxruntime as ort
 import torch
 from sklearn.cluster import KMeans
+from brisque import BRISQUE
 
 try:
     import fitz
@@ -117,38 +118,12 @@ class Table:
         self.lst_Y = lst_Y
         # self.lst_number = self.connect_part_in_column(self.lst_number)
         # сортировка списков по координате y
-
         self.X_before = lst_X.copy()
         self.Y_before = lst_Y.copy()
-        # for x in self.X_before:
-        #     print(x)
-        # if len(self.lst_X) != len(self.lst_Y):
-        #     self.lst_X = self.connect_part_in_column(self.lst_X)
-        #     self.lst_Y = self.connect_part_in_column(self.lst_Y)
 
         self.lst_X = self.merge_paths_column_list(self.lst_X)
         self.lst_Y = self.merge_paths_column_list(self.lst_Y)
-        # print(f"Списки: {len(self.lst_X)} и {len(self.lst_Y)}")
-        # проверка элементов to float
-        # if len(self.lst_X) != len(self.lst_Y):
-        #     for k,item in enumerate(self.lst_X):
-        #         try:
-        #             value = self.string_to_float(item['value'])
-        #             self.lst_X[k]['value'] = value
-        #         except:
-        #             del self.lst_X[k]
-        #     for k,item in enumerate(self.lst_Y):
-        #         try:
-        #             value = self.string_to_float(item['value'])
-        #             self.lst_Y[k]['value'] = value
-        #         except:
-        #             del self.lst_Y[k]
-        # else:
-        #     for k, (x_item,y_item) in enumerate(zip(self.lst_X, self.lst_Y)):
-        #         self.lst_X[k]['value'] = self.string_to_float(x_item['value'])
-        #         self.lst_Y[k]['value'] = self.string_to_float(y_item['value'])
 
-        # print(f"Списки: {len(self.lst_X)} и {len(self.lst_Y)}")
         self._create_cells(self.lst_number, self.lst_X, self.lst_Y)
 
         # to float
@@ -178,25 +153,6 @@ class Table:
                 self.cells[k][0] = self.get_nearest_number(item)
                 self.cells[k][1] = self.get_nearest_item_in_table(item, lst_X)
                 self.cells[k][2] = item
-        # if len(lst_X) == len(lst_Y):
-        #     self.cells = [[None for j in range(3)] for i in range(len(lst_X))]
-        #     for i, (x_v, y_v) in enumerate(zip(lst_X, lst_Y)):
-        #         self.cells[i][0] = self.get_nearest_number(x_v)
-        #         self.cells[i][1] = x_v
-        #         self.cells[i][2] = y_v
-        # else:
-        #     number_line = max(len(lst_X), len(lst_Y))
-        #     self.cells = [[None for j in range(3)] for i in range(number_line)]
-        #     if len(lst_X) > len(lst_Y):
-        #         for k, item in enumerate(lst_X):
-        #             self.cells[k][0] = self.get_nearest_number(item)
-        #             self.cells[k][1] = item
-        #             self.cells[k][2] = self.get_nearest_item_in_table(item, lst_Y)
-        #     else:
-        #         for k, item in enumerate(lst_Y):
-        #             self.cells[k][0] = self.get_nearest_number(item)
-        #             self.cells[k][1] = self.get_nearest_item_in_table(item, lst_X)
-        #             self.cells[k][2] = item
         return self.cells
 
     @property
@@ -415,10 +371,6 @@ class Table:
                 x2 = int((x_right.max() + r) * w)
                 y2 = int(y_right.max() * h)
                 img = self.image[y1:y2, x1:x2]
-                cv2.imwrite(
-                    f"./results/crop/crop_{x1}_{y1}.jpg",
-                    img,
-                )
                 result = self.model.reco_predictor([img])
                 val = result[0][0]
 
@@ -491,19 +443,14 @@ def preprocess_image(source_image):
     if image.shape[2] == 4:
         # convert the image from RGBA2RGB
         image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
-    # image = letterbox_image(image)
     w, h, c = image.shape
     image_resize = cv2.resize(image, (int(h / 2.5), int(w / 2.5)))
     image = rotate_image(image, get_angle_rotate(image_resize))
 
     image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 15)  #
     image = cv2.erode(image, kernel=np.ones((2, 2), np.uint8))  #
-    # image = cv2.resize(image, (736, 736))
     image, nh, nw, step_h, step_w, scale = letterbox_image(image, (1024, 1024))
-    # cv2.imwrite(
-    #     f"./results/crop/skew_net_{np.random.randint(500)}.jpg",
-    #     image,
-    # )
+
     image = image / image.max()
     image_norm = image.copy()
     batch = torch.tensor(image[np.newaxis, :], dtype=torch.float).permute(0, 3, 1, 2)
@@ -526,7 +473,7 @@ def determine_score(arr):
     return score
 
 
-def get_angle_rotate(image, delta=0.2, limit=4):
+def get_angle_rotate(image, delta=0.2, limit=3.2):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.bitwise_not(gray)
     thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
@@ -730,11 +677,9 @@ def correct_vertical_dim_table(image, y_low, y_high, check_discrepancy):
     if index_last < y_high:
         index_last = y_high
     # если сильно большое расхождение по высоте
-    print(index_start, y_low, index_last, y_high)
     if check_discrepancy:
         if index_start / y_low * 100 < 30:
             delta = (y_low - index_start) * 0.3
-            print(delta, (y_high - y_low))
             if delta > abs(y_high - y_low):
                 delta = abs(y_high - y_low)
             index_start = int(y_low - delta * 0.3)
@@ -790,6 +735,7 @@ def process_directory(root):
             detect_language=True,
             detect_orientation=False,
         )
+    brisq = BRISQUE(url=False)
 
     result_path = Path("./results")
     if result_path.exists():
@@ -881,6 +827,7 @@ def process_directory(root):
                     step_w,
                     scale,
                 )
+                # print(x1, y1, x2, y2)
                 down_cor = int(abs(y2 - y1) * 0.05)
                 # img_crop = img[y1 - down_cor : y2 + down_cor, x1 - 10 : x2 + 10, :]
 
@@ -891,6 +838,28 @@ def process_directory(root):
                     index_start, index_last = correct_vertical_dim_table(
                         img[:, x1:x2], y_low, y_high, True
                     )
+                elif len(table_predict) == 2:
+                    crds_tables = np.array(table_predicts[:, :4])
+
+                    if crds_tables[0][0] > crds_tables[1][0]:
+                        a = crds_tables[0].copy()
+                        crds_tables[0] = crds_tables[1]
+                        crds_tables[1] = a
+                    a1, a2 = crds_tables[0][0], crds_tables[0][2]
+                    b1, b2 = crds_tables[1][0], crds_tables[1][2]
+                    if (b1 - a2) > 0:
+                        index_start, index_last = correct_vertical_dim_table(
+                            img[:, x1:x2], y_low, y_high, True
+                        )
+                    else:
+                        if abs(b1 - a2) / (a2 - a1) * 100 < 15:
+                            index_start, index_last = correct_vertical_dim_table(
+                                img[:, x1:x2], y_low, y_high, True
+                            )
+                        else:
+                            index_start, index_last = correct_vertical_dim_table(
+                                img[:, x1:x2], y_low, y_high, False
+                            )
                 else:
                     index_start, index_last = correct_vertical_dim_table(
                         img[:, x1:x2], y_low, y_high, False
@@ -903,10 +872,10 @@ def process_directory(root):
                 # img_crop = cv2.erode(img_crop, kernel=np.ones((2, 2), np.uint8))
                 # save crop
 
-                cv2.imwrite(
-                    f"./results/crop/{Path(pdf_file).stem}_{np.random.randint(500)}.jpg",
-                    img_crop,
-                )
+                # cv2.imwrite(
+                #     f"./results/crop/{Path(pdf_file).stem}_{np.random.randint(500)}.jpg",
+                #     img_crop,
+                # )
                 try:
                     result = ocr([img_crop])
                     coords = collect_ocr_result(result)
@@ -918,7 +887,7 @@ def process_directory(root):
                     print("Неудалось", pdf_file, " ", e)
                     continue
 
-                if score_one < 0.94:
+                if score_one < 0.96 or brisq.score(img_crop) < 60:
                     print("Низкое качество")
                     bad_quality = True
                     total_quality = True
@@ -958,6 +927,10 @@ def process_directory(root):
                                 last_table_df = df
                                 tables.append(table)
                             else:
+                                # for x, y in zip(
+                                #     last_table_df.X.to_list(), df.X.to_list()
+                                # ):
+                                #     print(x, y)
                                 if last_table_df.X.tolist() == df.X.tolist():
                                     print("Совпадение таблиц")
                                 else:
@@ -972,7 +945,7 @@ def process_directory(root):
             # after tables t_pred
         if len(tables) > 0:
             if total_quality:
-                file_name = f"Плохое качество_{pdf_file.stem}"
+                file_name = f"Плохое_качество_изображения_{pdf_file.stem}"
             else:
                 file_name = pdf_file.stem
 
