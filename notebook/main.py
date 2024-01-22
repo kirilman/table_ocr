@@ -11,7 +11,7 @@ from nms import non_max_suppression
 import onnxruntime as ort
 import torch
 from sklearn.cluster import KMeans
-from brisque import BRISQUE
+from brisque.brisque import BRISQUE
 
 try:
     import fitz
@@ -721,9 +721,9 @@ def process_directory(root):
         )
 
         checkpoint_head = torch.load(
-            "./crnn_mobilenet_v3_large_pt-f5259ec2.pt", map_location="cuda"
+            "./crnn_mobilenet_v3_large_pt-f5259ec2.pt", map_location="cpu"
         )
-        checkpoint_dec = torch.load("./db_resnet50-ac60cadc.pt", map_location="cuda")
+        checkpoint_dec = torch.load("./db_resnet50-ac60cadc.pt", map_location="cpu")
 
         ocr.det_predictor.model.load_state_dict(checkpoint_dec)
         ocr.reco_predictor.model.load_state_dict(checkpoint_head)
@@ -955,9 +955,9 @@ def process_directory(root):
             # final_frame.to_csv(f"./results/{pdf_file.stem}.csv", index=False)
 
 
-# process_directory("./input/")
-
-# process_directory("./bad_example/")
+if __name__ == "__main__":
+    process_directory("./input/")
+    # process_directory("./bad_example/")
 
 # process_directory("/storage/reshetnikov/sber_table/dataset/hard/")
-process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
+# process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")
