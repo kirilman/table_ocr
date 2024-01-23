@@ -11,7 +11,9 @@ from nms import non_max_suppression
 import onnxruntime as ort
 import torch
 from sklearn.cluster import KMeans
-from brisque.brisque import BRISQUE
+
+# from brisque.brisque import BRISQUE
+from piq import brisque
 
 try:
     import fitz
@@ -735,7 +737,6 @@ def process_directory(root):
             detect_language=True,
             detect_orientation=False,
         )
-    brisq = BRISQUE(url=False)
 
     result_path = Path("./results")
     if result_path.exists():
@@ -886,8 +887,12 @@ def process_directory(root):
                 except Exception as e:
                     print("Неудалось", pdf_file, " ", e)
                     continue
-
-                if score_one < 0.96 or brisq.score(img_crop) < 60:
+                img_tensor = (
+                    torch.tensor(img_crop / img_crop.max())
+                    .unsqueeze(0)
+                    .permute(0, 3, 1, 2)
+                )
+                if score_one < 0.96 or brisque(img_tensor) < 56:
                     print("Низкое качество")
                     bad_quality = True
                     total_quality = True
