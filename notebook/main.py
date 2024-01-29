@@ -961,8 +961,8 @@ def process_directory(root):
 
 
 if __name__ == "__main__":
-    process_directory("./input/")
-    # process_directory("./bad_example/")
+    # process_directory("./input/")
+    process_directory("./bad_example/")
 
 # process_directory("/storage/reshetnikov/sber_table/dataset/hard/")
 # process_directory("/storage/reshetnikov/sber_table/dataset/tabl/")

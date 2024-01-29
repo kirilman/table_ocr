@@ -262,4 +262,4 @@ if __name__ == "__main__":
         error.append(cer)
 
     df = pd.DataFrame(results).T
-    df.to_csv("cer_table_fixf.csv")
+    df.to_csv("cer_table_fixf2.csv")
