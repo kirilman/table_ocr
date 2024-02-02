@@ -10,3 +10,16 @@ matplotlib
 scipy
 pymupdf
 opencv-python
+numpy
+pillow==10.2.0
+pandas
+onnxruntime
+torch
+python-doctr[torch]
+scikit-learn
+piq
+matplotlib
+scipy
+pymupdf
+opencv-python
+pdf2image
